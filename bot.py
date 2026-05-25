@@ -28,33 +28,27 @@ logger = logging.getLogger(__name__)
 def init_db():
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute(
-        """
+    c.execute("""
         CREATE TABLE IF NOT EXISTS fechas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL,
             evento TEXT NOT NULL,
             material TEXT
         )
-        """
-    )
-    c.execute(
-        """
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS feriados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL UNIQUE
         )
-        """
-    )
-    c.execute(
-        """
+    """)
+    c.execute("""
         CREATE TABLE IF NOT EXISTS planes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL UNIQUE,
             contenido TEXT NOT NULL
         )
-        """
-    )
+    """)
     conn.commit()
     conn.close()
 
@@ -73,10 +67,7 @@ def get_fechas():
 def save_fecha(fecha: str, evento: str, material: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute(
-        "INSERT INTO fechas (fecha, evento, material) VALUES (?, ?, ?)",
-        (fecha, evento, material),
-    )
+    c.execute("INSERT INTO fechas (fecha, evento, material) VALUES (?, ?, ?)", (fecha, evento, material))
     conn.commit()
     conn.close()
 
@@ -93,8 +84,6 @@ def delete_fecha_by_index(index: int) -> bool:
     conn.close()
     return True
 
-
-# ── Feriados ──────────────────────────────────────────────────────────────────
 
 def save_feriado(fecha: str):
     conn = sqlite3.connect("planner.db")
@@ -135,15 +124,10 @@ def is_feriado(fecha: str) -> bool:
     return result is not None
 
 
-# ── Planes ────────────────────────────────────────────────────────────────────
-
 def save_plan(fecha: str, contenido: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute(
-        "INSERT OR REPLACE INTO planes (fecha, contenido) VALUES (?, ?)",
-        (fecha, contenido),
-    )
+    c.execute("INSERT OR REPLACE INTO planes (fecha, contenido) VALUES (?, ?)", (fecha, contenido))
     conn.commit()
     conn.close()
 
@@ -178,7 +162,7 @@ NASA ISSDC — DESLA — Competencia anual, preparación continua.
 Materias IGCSE — Siempre al día. Material en Kognity.
 Marketing/Instagram — Real Estate, sin deadline."""
 
-PROMPT_TEMPLATE = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
+PROMPT_DIA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
 
 RUTINA SEMANAL:
 - Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
@@ -224,14 +208,92 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
 """
 
+PROMPT_SEMANA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
+
+RUTINA SEMANAL:
+- Lunes: estudio disponible 22:00-22:30
+- Martes: estudio disponible 22:00-22:30
+- Miércoles: estudio disponible 22:00-22:30
+- Jueves: estudio disponible 22:00-22:30
+- Viernes: estudio disponible 20:30-22:30
+- Sábado: tarde libre
+- Domingo: tarde libre
+
+PROYECTOS ACTIVOS:
+- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.
+- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.
+- Debate WSDC — práctica continua.
+- NASA ISSDC DESLA — preparación continua.
+- Materias IGCSE — siempre al día.
+- Marketing/Instagram — sin deadline.
+
+FECHAS CARGADAS:
+{fechas_db}
+
+Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 7 días.
+
+IMPORTANTE:
+- Máximo 2 tareas por día
+- Una línea por tarea, sin explicaciones ni justificaciones
+- Distribuí por urgencia, deadline más cercano primero
+- Respetá los slots de estudio según el día
+
+FORMATO — sin markdown, sin símbolos extra:
+
+📅 SEMANA DEL {fecha_hoy} AL {fecha_fin}
+
+[Día] [DD/MM]
+→ [Proyecto]: [tarea específica]
+→ [Proyecto]: [tarea específica]
+
+(Solo incluir días que tengan algo asignado)
+"""
+
+PROMPT_MES = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
+
+RUTINA SEMANAL:
+- Lunes: estudio disponible 22:00-22:30
+- Martes: estudio disponible 22:00-22:30
+- Miércoles: estudio disponible 22:00-22:30
+- Jueves: estudio disponible 22:00-22:30
+- Viernes: estudio disponible 20:30-22:30
+- Sábado: tarde libre
+- Domingo: tarde libre
+
+PROYECTOS ACTIVOS:
+- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.
+- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.
+- Debate WSDC — práctica continua.
+- NASA ISSDC DESLA — preparación continua.
+- Materias IGCSE — siempre al día.
+- Marketing/Instagram — sin deadline.
+
+FECHAS CARGADAS:
+{fechas_db}
+
+Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 30 días.
+
+IMPORTANTE:
+- Máximo 2 tareas por día
+- Una línea por tarea, sin explicaciones ni justificaciones
+- Distribuí por urgencia, deadline más cercano primero
+- Respetá los slots de estudio según el día
+
+FORMATO — sin markdown, sin símbolos extra:
+
+📅 PRÓXIMOS 30 DÍAS
+
+[Día] [DD/MM]
+→ [Proyecto]: [tarea específica]
+→ [Proyecto]: [tarea específica]
+
+(Solo incluir días que tengan algo asignado)
+"""
+
 # ── Claude ────────────────────────────────────────────────────────────────────
 
-def generar_plan_texto() -> str:
-    # Fix 1: timeout extendido a 2 minutos
-    client = anthropic.Anthropic(
-        api_key=ANTHROPIC_API_KEY,
-        timeout=120.0,
-    )
+def generar_plan_texto():
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
 
     ahora_ar = datetime.now(AR_TZ)
     manana_ar = ahora_ar + timedelta(days=1)
@@ -247,20 +309,17 @@ def generar_plan_texto() -> str:
     fecha_manana = manana_ar.strftime("%d/%m/%Y")
 
     rows = get_fechas()
-    if rows:
-        fechas_str = "\n".join(
-            f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-            for r in rows
-        )
-    else:
-        fechas_str = "No hay fechas cargadas."
+    fechas_str = "\n".join(
+        f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
+        for r in rows
+    ) if rows else "No hay fechas cargadas."
 
     if is_feriado(fecha_manana):
         contexto_feriado = "DÍA ESPECIAL: Mañana es feriado o no hay colegio. No incluyas bloque de colegio ni horario de levantarse a las 7:30. Tratalo como día libre — Franco puede organizar su tiempo desde cuando quiera. Mantené los entrenamientos si corresponde al día de la semana.\n\n"
     else:
         contexto_feriado = ""
 
-    prompt = PROMPT_TEMPLATE.format(
+    prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
         dia_semana=dia_semana,
         fecha_hoy=fecha_hoy,
@@ -281,6 +340,42 @@ def generar_plan_texto() -> str:
     return plan, fecha_manana
 
 
+async def _enviar_plan_multipartes(update, texto: str):
+    """Envía el texto en partes si supera 4096 chars. Divide por líneas de días."""
+    if len(texto) <= 4096:
+        await update.message.reply_text(texto)
+        return
+
+    # Intentar dividir en bloques de días (líneas que empiezan con nombre de día)
+    lineas = texto.split("\n")
+    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    # Encontrar índices donde empiezan los días
+    indices_dias = []
+    for i, linea in enumerate(lineas):
+        for nombre in dias_nombres:
+            if linea.strip().startswith(nombre):
+                indices_dias.append(i)
+                break
+
+    if len(indices_dias) >= 2:
+        # Dividir: días 1-4 en primera parte, resto en segunda
+        corte = indices_dias[min(4, len(indices_dias) - 1)]
+        parte1 = "\n".join(lineas[:corte]).strip()
+        parte2 = "\n".join(lineas[corte:]).strip()
+        if parte1:
+            await update.message.reply_text(parte1)
+        if parte2:
+            await update.message.reply_text(parte2)
+    else:
+        # Fallback: cortar en 4096 chars en un salto de línea
+        chunk1 = texto[:4000].rsplit("\n", 1)[0]
+        chunk2 = texto[len(chunk1):].strip()
+        await update.message.reply_text(chunk1)
+        if chunk2:
+            await update.message.reply_text(chunk2)
+
+
 # ── Comandos Telegram ─────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -295,8 +390,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/borrarf N — borrar el feriado número N\n"
         "/plan — ver el plan de hoy\n"
         "/generar — generar el plan de mañana ahora\n"
-        "/semana — ver eventos de esta semana\n"
-        "/mes — ver eventos de los próximos 30 días\n"
+        "/semana — plan de estudio para los próximos 7 días\n"
+        "/mes — plan de estudio para los próximos 30 días\n"
         "/proyectos — ver proyectos activos\n"
         "/rutina — ver rutina semanal\n\n"
         "El plan del día siguiente se genera automáticamente a las 22:00 🕙"
@@ -307,9 +402,7 @@ async def cmd_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = " ".join(context.args)
     partes = [p.strip() for p in texto.split("|")]
     if len(partes) < 2:
-        await update.message.reply_text(
-            "❌ Formato: /fecha DD/MM/AAAA | Evento | Material (el material es opcional)"
-        )
+        await update.message.reply_text("❌ Formato: /fecha DD/MM/AAAA | Evento | Material (el material es opcional)")
         return
     fecha = partes[0]
     evento = partes[1]
@@ -413,75 +506,65 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hoy = datetime.now(AR_TZ)
-    lunes = hoy - timedelta(days=hoy.weekday())
-    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    await update.message.reply_text("⏳ Generando plan, esperá un momento...")
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
+        ahora_ar = datetime.now(AR_TZ)
+        fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
+        fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
 
-    rows = get_fechas()
-    eventos_por_fecha = {}
-    for (_, fecha, evento, _material) in rows:
-        eventos_por_fecha.setdefault(fecha, []).append(evento)
+        rows = get_fechas()
+        fechas_str = "\n".join(
+            f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
+            for r in rows
+        ) if rows else "No hay fechas cargadas."
 
-    semana_inicio = lunes.strftime("%d/%m")
-    semana_fin = (lunes + timedelta(days=6)).strftime("%d/%m")
-    header = f"📅 SEMANA DEL {semana_inicio} AL {semana_fin}"
+        prompt = PROMPT_SEMANA.format(
+            fechas_db=fechas_str,
+            fecha_hoy=fecha_hoy,
+            fecha_fin=fecha_fin,
+        )
 
-    # Fix 3: dividir en dos mensajes — días 1-4 y días 5-7
-    parte1 = []
-    parte2 = []
-    for i in range(7):
-        dia = lunes + timedelta(days=i)
-        fecha_str = dia.strftime("%d/%m/%Y")
-        nombre_dia = dias_es[i]
-        fecha_display = dia.strftime("%d/%m")
-        if fecha_str in eventos_por_fecha:
-            eventos = ", ".join(eventos_por_fecha[fecha_str])
-            linea = f"{nombre_dia} {fecha_display} — {eventos}"
-        else:
-            linea = f"{nombre_dia} {fecha_display} — Sin eventos"
-        if i < 4:
-            parte1.append(linea)
-        else:
-            parte2.append(linea)
-
-    await update.message.reply_text(header + "\n\n" + "\n".join(parte1))
-    await update.message.reply_text("\n".join(parte2))
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        texto = message.content[0].text
+        await _enviar_plan_multipartes(update, texto)
+    except Exception as e:
+        logger.error(f"Error en /semana: {e}")
+        await update.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
 
 
 async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hoy = datetime.now(AR_TZ)
-    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    await update.message.reply_text("⏳ Generando plan, esperá un momento...")
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
+        ahora_ar = datetime.now(AR_TZ)
+        fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
 
-    rows = get_fechas()
-    eventos_por_fecha = {}
-    for (_, fecha, evento, _material) in rows:
-        eventos_por_fecha.setdefault(fecha, []).append(evento)
+        rows = get_fechas()
+        fechas_str = "\n".join(
+            f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
+            for r in rows
+        ) if rows else "No hay fechas cargadas."
 
-    lines = []
-    for i in range(1, 31):
-        dia = hoy + timedelta(days=i)
-        fecha_str = dia.strftime("%d/%m/%Y")
-        if fecha_str in eventos_por_fecha:
-            nombre_dia = dias_es[dia.weekday()]
-            fecha_display = dia.strftime("%d/%m")
-            eventos = ", ".join(eventos_por_fecha[fecha_str])
-            lines.append(f"{nombre_dia} {fecha_display} — {eventos}")
+        prompt = PROMPT_MES.format(
+            fechas_db=fechas_str,
+            fecha_hoy=fecha_hoy,
+        )
 
-    if not lines:
-        await update.message.reply_text("📭 No hay eventos cargados en los próximos 30 días.")
-        return
-
-    # Dividir en chunks de máx 3800 chars para evitar el límite de Telegram
-    header = "📅 PRÓXIMOS 30 DÍAS\n\n"
-    chunk = header
-    for line in lines:
-        if len(chunk) + len(line) + 1 > 3800:
-            await update.message.reply_text(chunk)
-            chunk = line + "\n"
-        else:
-            chunk += line + "\n"
-    if chunk:
-        await update.message.reply_text(chunk)
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        texto = message.content[0].text
+        await _enviar_plan_multipartes(update, texto)
+    except Exception as e:
+        logger.error(f"Error en /mes: {e}")
+        await update.message.reply_text(f"❌ Error al generar el plan mensual: {e}")
 
 
 async def cmd_proyectos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -529,13 +612,7 @@ def main():
 
     # Scheduler — 22:00 hora Argentina
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
-    scheduler.add_job(
-        job_noche,
-        trigger="cron",
-        hour=22,
-        minute=0,
-        args=[app],
-    )
+    scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
 
