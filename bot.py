@@ -67,6 +67,13 @@ def init_db():
             descripcion TEXT NOT NULL
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rutina_permanente (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia TEXT NOT NULL,
+            descripcion TEXT NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -202,6 +209,28 @@ def delete_rutina_modificada(fecha: str):
     conn.commit()
     conn.close()
 
+def save_rutina_permanente(dia: str, descripcion: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO rutina_permanente (dia, descripcion) VALUES (?, ?)", (dia, descripcion))
+    conn.commit()
+    conn.close()
+
+def get_rutinas_permanentes():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT id, dia, descripcion FROM rutina_permanente ORDER BY id")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_rutina_permanente_by_id(row_id: int):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM rutina_permanente WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+
 # ── Contexto hardcodeado ──────────────────────────────────────────────────────
 
 RUTINA_TEXTO = """🗓 RUTINA SEMANAL
@@ -242,7 +271,7 @@ PROYECTOS Y DEADLINES:
 - Materias IGCSE — al día. Material en Kognity.
 - Marketing/Instagram — Real Estate, sin deadline.
 
-FECHAS PRÓXIMAS CARGADAS:
+{contexto_rutina_fija}FECHAS PRÓXIMAS CARGADAS:
 {fechas_db}
 
 {contexto_feriado}{contexto_rutina}Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
@@ -390,6 +419,17 @@ def generar_plan_texto():
     else:
         contexto_rutina = ""
 
+    # Rutina permanente (eventos fijos adicionales)
+    rutina_perm_rows = get_rutinas_permanentes()
+    if rutina_perm_rows:
+        lineas_perm = []
+        for _, dia, desc in rutina_perm_rows:
+            dia_label = "todos los días" if dia == "multiple" else dia
+            lineas_perm.append(f"- {desc} ({dia_label})")
+        contexto_rutina_fija = "EVENTOS FIJOS ADICIONALES EN RUTINA:\n" + "\n".join(lineas_perm) + "\n\n"
+    else:
+        contexto_rutina_fija = ""
+
     prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
         dia_semana=dia_semana,
@@ -399,6 +439,7 @@ def generar_plan_texto():
         fecha_manana=fecha_manana,
         contexto_feriado=contexto_feriado,
         contexto_rutina=contexto_rutina,
+        contexto_rutina_fija=contexto_rutina_fija,
     )
 
     message = client.messages.create(
@@ -465,9 +506,7 @@ def _parsear_entrada_fecha(texto: str):
         horario = ""
         material = ""
     elif len(partes) == 3:
-        # Puede ser: Evento | HH:MM | o Evento | Material
-        # Si la tercera parte parece un horario (HH:MM), lo tratamos como horario sin material
-        # Caso general: asumimos que es material (sin horario)
+        # Caso general: la tercera parte es material (sin horario)
         horario = ""
         material = partes[2]
     else:
@@ -500,7 +539,39 @@ def _build_main_keyboard():
             InlineKeyboardButton("🔄 Cambiar rutina", callback_data="cambiar_rutina"),
             InlineKeyboardButton("📚 Proyectos", callback_data="proyectos"),
         ],
+        [
+            InlineKeyboardButton("⚙️ Editar rutina fija", callback_data="rutina_fija"),
+        ],
     ])
+
+def _build_rutina_fija_keyboard(rows):
+    """Keyboard para la pantalla principal de rutina fija."""
+    dias_buttons = [
+        [
+            InlineKeyboardButton("Lunes", callback_data="rf_ver_Lunes"),
+            InlineKeyboardButton("Martes", callback_data="rf_ver_Martes"),
+            InlineKeyboardButton("Miércoles", callback_data="rf_ver_Miercoles"),
+        ],
+        [
+            InlineKeyboardButton("Jueves", callback_data="rf_ver_Jueves"),
+            InlineKeyboardButton("Viernes", callback_data="rf_ver_Viernes"),
+        ],
+        [
+            InlineKeyboardButton("Sábado", callback_data="rf_ver_Sabado"),
+            InlineKeyboardButton("Domingo", callback_data="rf_ver_Domingo"),
+        ],
+        [InlineKeyboardButton("➕ Agregar evento fijo", callback_data="rf_agregar")],
+    ]
+    del_buttons = []
+    for row_id, dia, desc in rows:
+        dia_label = "Todos" if dia == "multiple" else dia
+        del_buttons.append([
+            InlineKeyboardButton(
+                f"🗑️ [{dia_label}] {desc[:35]}",
+                callback_data=f"rf_del|{row_id}"
+            )
+        ])
+    return InlineKeyboardMarkup(del_buttons + dias_buttons)
 
 def _build_dias_keyboard():
     return InlineKeyboardMarkup([
@@ -525,6 +596,28 @@ def _build_cambio_keyboard():
         [InlineKeyboardButton("🕐 Cambiar horario", callback_data="rutina_cambiar_horario")],
         [InlineKeyboardButton("📝 Escribir manualmente", callback_data="rutina_manual")],
     ])
+
+# ── Helpers de rutina fija ────────────────────────────────────────────────────
+
+# Mapa callback → nombre con tilde para mostrar en pantalla
+_RF_DIA_MAP = {
+    "rf_ver_Lunes":     "Lunes",
+    "rf_ver_Martes":    "Martes",
+    "rf_ver_Miercoles": "Miércoles",
+    "rf_ver_Jueves":    "Jueves",
+    "rf_ver_Viernes":   "Viernes",
+    "rf_ver_Sabado":    "Sábado",
+    "rf_ver_Domingo":   "Domingo",
+}
+
+def _texto_rutina_fija(rows):
+    if rows:
+        lineas = []
+        for _, dia, desc in rows:
+            dia_label = "Todos los días" if dia == "multiple" else dia
+            lineas.append(f"• [{dia_label}] {desc}")
+        return "⚙️ RUTINA FIJA\n\n" + "\n".join(lineas)
+    return "⚙️ RUTINA FIJA\n\nNo hay eventos fijos cargados."
 
 # ── Comandos Telegram ─────────────────────────────────────────────────────────
 
@@ -844,7 +937,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         delete_rutina_modificada(fecha)
         await query.edit_message_text(f"🗑️ Cambio de rutina para {fecha} eliminado.")
 
-# ── Message Handler ───────────────────────────────────────────────────────────
+    # ── Rutina fija ───────────────────────────────────────────────────────────
+
+    elif data == "rutina_fija":
+        rows = get_rutinas_permanentes()
+        await query.edit_message_text(
+            _texto_rutina_fija(rows),
+            reply_markup=_build_rutina_fija_keyboard(rows),
+        )
+
+    elif data in _RF_DIA_MAP:
+        dia_nombre = _RF_DIA_MAP[data]
+        all_rows = get_rutinas_permanentes()
+        rows_dia = [r for r in all_rows if r[1] == dia_nombre or r[1] == "multiple"]
+        if rows_dia:
+            lineas = []
+            for _, r_dia, r_desc in rows_dia:
+                tag = " (todos los días)" if r_dia == "multiple" else ""
+                lineas.append(f"• {r_desc}{tag}")
+            texto = f"📅 {dia_nombre.upper()}\n\n" + "\n".join(lineas)
+        else:
+            texto = f"📅 {dia_nombre.upper()}\n\nNo hay eventos fijos para este día."
+        del_buttons = []
+        for r_id, r_dia, r_desc in rows_dia:
+            del_buttons.append([
+                InlineKeyboardButton(f"🗑️ {r_desc[:40]}", callback_data=f"rf_del|{r_id}")
+            ])
+        keyboard = InlineKeyboardMarkup(
+            del_buttons + [
+                [InlineKeyboardButton(f"➕ Agregar para {dia_nombre}", callback_data=f"rf_add|{dia_nombre}")],
+                [InlineKeyboardButton("← Volver", callback_data="rutina_fija")],
+            ]
+        )
+        await query.edit_message_text(texto, reply_markup=keyboard)
+
+    elif data == "rf_agregar":
+        context.user_data['estado'] = 'esperando_desc_rutina_fija'
+        context.user_data['rf_dia'] = 'multiple'
+        await query.edit_message_text(
+            "Describí el evento fijo (aplica a todos los días):\n\n"
+            "Ejemplo: Tomar vitaminas a las 8:00"
+        )
+
+    elif data.startswith("rf_add|"):
+        dia_nombre = data.split("|", 1)[1]
+        context.user_data['estado'] = 'esperando_desc_rutina_fija'
+        context.user_data['rf_dia'] = dia_nombre
+        await query.edit_message_text(
+            f"Describí el evento fijo para {dia_nombre}:\n\n"
+            "Ejemplo: Clase de piano 17:00-18:00"
+        )
+
+    elif data.startswith("rf_del|"):
+        row_id = int(data.split("|", 1)[1])
+        delete_rutina_permanente_by_id(row_id)
+        rows = get_rutinas_permanentes()
+        await query.edit_message_text(
+            _texto_rutina_fija(rows),
+            reply_markup=_build_rutina_fija_keyboard(rows),
+        )
+
+# ── Message Handler ──────────────────────────────────────────────────────
 
 async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
@@ -873,7 +1026,7 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             datetime.strptime(texto, "%d/%m/%Y")
         except ValueError:
             await update.message.reply_text(
-                "❌ Fecha inválida. Mandame la fecha en formato DD/MM/AAAA"
+                "❌ Fecha inválida. Mandamé la fecha en formato DD/MM/AAAA"
             )
             return
         context.user_data['rutina_fecha'] = texto
@@ -902,6 +1055,15 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Guardado para el {fecha}: {texto}. Lo voy a tener en cuenta al generar el plan."
         )
 
+    elif estado == 'esperando_desc_rutina_fija':
+        dia = context.user_data.get('rf_dia', 'multiple')
+        save_rutina_permanente(dia, texto)
+        context.user_data.clear()
+        dia_label = "todos los días" if dia == "multiple" else dia
+        await update.message.reply_text(
+            f"✅ Evento fijo guardado para {dia_label}:\n{texto}"
+        )
+
     elif texto.lower() in ['hola', 'menu', 'menú']:
         context.user_data.clear()
         await update.message.reply_text(
@@ -909,7 +1071,7 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_build_main_keyboard(),
         )
 
-# ── Cron job ──────────────────────────────────────────────────────────────────
+# ── Cron job ──────────────────────────────────────────────────────
 
 async def job_noche(app):
     logger.info("Ejecutando cron job nocturno...")
@@ -922,7 +1084,7 @@ async def job_noche(app):
         logger.error(f"Error en cron job: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar el plan automático: {e}")
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────
 
 def main():
     init_db()
