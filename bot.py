@@ -36,9 +36,17 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL,
             evento TEXT NOT NULL,
+            horario TEXT,
             material TEXT
         )
     """)
+    # Migración: agregar columna horario si no existe (para DBs existentes)
+    try:
+        c.execute("ALTER TABLE fechas ADD COLUMN horario TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # La columna ya existe
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS feriados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,16 +74,19 @@ def get_fechas():
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute(
-        "SELECT id, fecha, evento, material FROM fechas ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+        "SELECT id, fecha, evento, horario, material FROM fechas ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
     )
     rows = c.fetchall()
     conn.close()
     return rows
 
-def save_fecha(fecha: str, evento: str, material: str):
+def save_fecha(fecha: str, evento: str, horario: str, material: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute("INSERT INTO fechas (fecha, evento, material) VALUES (?, ?, ?)", (fecha, evento, material))
+    c.execute(
+        "INSERT INTO fechas (fecha, evento, horario, material) VALUES (?, ?, ?, ?)",
+        (fecha, evento, horario or None, material or None)
+    )
     conn.commit()
     conn.close()
 
@@ -90,6 +101,21 @@ def delete_fecha_by_index(index: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
+def _format_fechas_para_prompt(rows) -> str:
+    """Formatea las fechas para incluir en el prompt de Claude."""
+    if not rows:
+        return "No hay fechas cargadas."
+    lines = []
+    for r in rows:
+        # r = (id, fecha, evento, horario, material)
+        linea = f"- {r[1]}: {r[2]}"
+        if r[3]:  # horario
+            linea += f" - Horario: {r[3]}"
+        if r[4]:  # material
+            linea += f" - Material: {r[4]}"
+        lines.append(linea)
+    return "\n".join(lines)
 
 def save_feriado(fecha: str):
     conn = sqlite3.connect("planner.db")
@@ -344,10 +370,7 @@ def generar_plan_texto():
     fecha_manana = manana_ar.strftime("%d/%m/%Y")
 
     rows = get_fechas()
-    fechas_str = "\n".join(
-        f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-        for r in rows
-    ) if rows else "No hay fechas cargadas."
+    fechas_str = _format_fechas_para_prompt(rows)
 
     if is_feriado(fecha_manana):
         contexto_feriado = (
@@ -388,7 +411,6 @@ def generar_plan_texto():
     save_plan(fecha_manana, plan)
     return plan, fecha_manana
 
-
 async def _enviar_plan_multipartes(reply_obj, texto: str):
     """Envía el texto en partes si supera 4096 chars. reply_obj es update.message o query.message."""
     if len(texto) <= 4096:
@@ -419,6 +441,44 @@ async def _enviar_plan_multipartes(reply_obj, texto: str):
         await reply_obj.reply_text(chunk1)
         if chunk2:
             await reply_obj.reply_text(chunk2)
+
+# ── Helpers de parseo de fecha ────────────────────────────────────────────────
+
+def _parsear_entrada_fecha(texto: str):
+    """
+    Acepta estos formatos:
+      DD/MM/AAAA | Evento | HH:MM | Material   (4 partes)
+      DD/MM/AAAA | Evento | | Material          (4 partes, horario vacío)
+      DD/MM/AAAA | Evento | Material            (3 partes — sin horario)
+      DD/MM/AAAA | Evento                       (2 partes — solo fecha y evento)
+
+    Devuelve (fecha, evento, horario, material) o lanza ValueError.
+    """
+    partes = [p.strip() for p in texto.split("|")]
+    if len(partes) < 2:
+        raise ValueError("formato_incorrecto")
+
+    fecha = partes[0]
+    evento = partes[1]
+
+    if len(partes) == 2:
+        horario = ""
+        material = ""
+    elif len(partes) == 3:
+        # Puede ser: Evento | HH:MM | o Evento | Material
+        # Si la tercera parte parece un horario (HH:MM), lo tratamos como horario sin material
+        # Caso general: asumimos que es material (sin horario)
+        horario = ""
+        material = partes[2]
+    else:
+        # 4+ partes: fecha | evento | horario (puede ser vacío) | material
+        horario = partes[2]
+        material = partes[3]
+
+    # Validar fecha
+    datetime.strptime(fecha, "%d/%m/%Y")
+
+    return fecha, evento, horario, material
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -477,20 +537,21 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = " ".join(context.args)
-    partes = [p.strip() for p in texto.split("|")]
-    if len(partes) < 2:
-        await update.message.reply_text("❌ Formato: /fecha DD/MM/AAAA | Evento | Material (el material es opcional)")
-        return
-    fecha = partes[0]
-    evento = partes[1]
-    material = partes[2] if len(partes) >= 3 else ""
     try:
-        datetime.strptime(fecha, "%d/%m/%Y")
+        fecha, evento, horario, material = _parsear_entrada_fecha(texto)
     except ValueError:
-        await update.message.reply_text("❌ Fecha inválida. Usá el formato DD/MM/AAAA")
+        await update.message.reply_text(
+            "❌ Formato incorrecto. Usá:\n"
+            "/fecha DD/MM/AAAA | Evento | Hora (opcional) | Material\n\n"
+            "Ejemplos:\n"
+            "06/06/2026 | ONU | 12:00 | Preparar discurso\n"
+            "15/06/2026 | Examen Biology | | Chapter 4 Kognity\n"
+            "02/07/2026 | OMA | Ejercicios exámenes pasados"
+        )
         return
-    save_fecha(fecha, evento, material)
-    await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}")
+    save_fecha(fecha, evento, horario, material)
+    extra = f" a las {horario}" if horario else ""
+    await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}{extra}")
 
 async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = get_fechas()
@@ -498,9 +559,10 @@ async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 No hay fechas cargadas.")
         return
     lines = []
-    for i, (_, fecha, evento, material) in enumerate(rows, 1):
-        mat = f" (Material: {material})" if material else ""
-        lines.append(f"{i}. {fecha} — {evento}{mat}")
+    for i, (_, fecha, evento, horario, material) in enumerate(rows, 1):
+        hora_str = f" {horario}" if horario else ""
+        mat_str = f" (Material: {material})" if material else ""
+        lines.append(f"{i}. {fecha} — {evento}{hora_str}{mat_str}")
     await update.message.reply_text("📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines))
 
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -582,10 +644,7 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
         fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
         rows = get_fechas()
-        fechas_str = "\n".join(
-            f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-            for r in rows
-        ) if rows else "No hay fechas cargadas."
+        fechas_str = _format_fechas_para_prompt(rows)
         prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -604,10 +663,7 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ahora_ar = datetime.now(AR_TZ)
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
         rows = get_fechas()
-        fechas_str = "\n".join(
-            f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-            for r in rows
-        ) if rows else "No hay fechas cargadas."
+        fechas_str = _format_fechas_para_prompt(rows)
         prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -672,10 +728,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
             fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
             rows = get_fechas()
-            fechas_str = "\n".join(
-                f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-                for r in rows
-            ) if rows else "No hay fechas cargadas."
+            fechas_str = _format_fechas_para_prompt(rows)
             prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
@@ -694,10 +747,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ahora_ar = datetime.now(AR_TZ)
             fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
             rows = get_fechas()
-            fechas_str = "\n".join(
-                f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
-                for r in rows
-            ) if rows else "No hay fechas cargadas."
+            fechas_str = _format_fechas_para_prompt(rows)
             prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
@@ -713,9 +763,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['estado'] = 'esperando_fecha_nueva'
         await query.edit_message_text(
             "Mandame la fecha en este formato:\n"
-            "📝 DD/MM/AAAA | Evento | Material\n\n"
-            "Ejemplo:\n"
-            "15/06/2026 | Examen Biology | Chapter 4 Kognity"
+            "📝 DD/MM/AAAA | Evento | Hora (opcional) | Material\n\n"
+            "Ejemplos:\n"
+            "06/06/2026 | ONU | 12:00 | Preparar discurso\n"
+            "15/06/2026 | Examen Biology | | Chapter 4 Kognity\n"
+            "02/07/2026 | OMA | Ejercicios exámenes pasados"
         )
 
     elif data == "fechas":
@@ -724,9 +776,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("📭 No hay fechas cargadas.")
         else:
             lines = []
-            for i, (_, fecha, evento, material) in enumerate(rows, 1):
-                mat = f" (Material: {material})" if material else ""
-                lines.append(f"{i}. {fecha} — {evento}{mat}")
+            for i, (_, fecha, evento, horario, material) in enumerate(rows, 1):
+                hora_str = f" {horario}" if horario else ""
+                mat_str = f" (Material: {material})" if material else ""
+                lines.append(f"{i}. {fecha} — {evento}{hora_str}{mat_str}")
             await query.edit_message_text("📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines))
 
     elif data == "proyectos":
@@ -798,25 +851,22 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     estado = context.user_data.get('estado')
 
     if estado == 'esperando_fecha_nueva':
-        partes = [p.strip() for p in texto.split("|")]
-        if len(partes) < 2:
+        try:
+            fecha, evento, horario, material = _parsear_entrada_fecha(texto)
+        except ValueError:
             await update.message.reply_text(
                 "❌ Formato incorrecto. Usá:\n"
-                "DD/MM/AAAA | Evento | Material\n\n"
-                "Ejemplo:\n15/06/2026 | Examen Biology | Chapter 4 Kognity"
+                "DD/MM/AAAA | Evento | Hora (opcional) | Material\n\n"
+                "Ejemplos:\n"
+                "06/06/2026 | ONU | 12:00 | Preparar discurso\n"
+                "15/06/2026 | Examen Biology | | Chapter 4 Kognity\n"
+                "02/07/2026 | OMA | Ejercicios exámenes pasados"
             )
             return
-        fecha = partes[0]
-        evento = partes[1]
-        material = partes[2] if len(partes) >= 3 else ""
-        try:
-            datetime.strptime(fecha, "%d/%m/%Y")
-        except ValueError:
-            await update.message.reply_text("❌ Fecha inválida. Usá el formato DD/MM/AAAA")
-            return
-        save_fecha(fecha, evento, material)
+        save_fecha(fecha, evento, horario, material)
         context.user_data.clear()
-        await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}")
+        extra = f" a las {horario}" if horario else ""
+        await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}{extra}")
 
     elif estado == 'esperando_fecha_rutina':
         try:
