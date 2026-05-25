@@ -23,8 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database
-
 def init_db():
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
@@ -112,9 +110,9 @@ RUTINA SEMANAL:
 - Domingo: Gym 11:00-12:30 -> tarde libre -> Dormir 22:30
 
 PROYECTOS ACTIVOS Y DEADLINES:
-- OMA (Olimpiadas Matematicas Argentinas) deadline 2 julio. Preparacion: ejercicios de examenes pasados.
-- MUN (ANU-AR) 26, 27 y 28 de junio. Representa Liberia en AG3. Preparar: topicos de ANU-AR, discursos, posicion de Liberia.
-- Debate WSDC (ADA) sin fecha fija, practica continua. Formato WSDC, mociones variadas.
+- OMA deadline 2 julio. Preparacion: ejercicios de examenes pasados.
+- MUN (ANU-AR) 26, 27 y 28 de junio. Representa Liberia en AG3.
+- Debate WSDC (ADA) sin fecha fija, practica continua.
 - NASA ISSDC DESLA competencia anual, preparacion continua.
 - Materias IGCSE siempre al dia. Material en Kognity.
 - Marketing/Instagram Real Estate, sin deadline.
@@ -126,9 +124,8 @@ Hoy es {dia_semana} {fecha_hoy}. Genera el plan detallado para maniana ({fecha_m
 
 El plan debe:
 - Respetar estrictamente los horarios de la rutina
-- Asignar tareas de estudio al slot disponible segun el dia
 - Priorizar por urgencia (deadline mas cercano primero)
-- Ser especifico: no "estudiar MUN" sino "leer posicion de Liberia sobre topico X"
+- Ser especifico con cada tarea
 - Formato claro con emojis y horarios
 - Terminar con una frase motivadora corta
 """
@@ -142,10 +139,7 @@ def generar_plan_texto():
     fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
     fecha_manana = manana_ar.strftime("%d/%m/%Y")
     rows = get_fechas()
-    if rows:
-        fechas_str = "\n".join(f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "") for r in rows)
-    else:
-        fechas_str = "No hay fechas cargadas."
+    fechas_str = "\n".join(f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "") for r in rows) if rows else "No hay fechas cargadas."
     prompt = PROMPT_TEMPLATE.format(fechas_db=fechas_str, dia_semana=dia_semana, fecha_hoy=fecha_hoy, fecha_manana=fecha_manana)
     message = client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=1500, messages=[{"role":"user","content":prompt}])
     plan = message.content[0].text
@@ -242,7 +236,8 @@ def main():
     app.add_handler(CommandHandler("proyectos", cmd_proyectos))
     app.add_handler(CommandHandler("rutina", cmd_rutina))
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
-    scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
+    # TEST: cron a las 00:39 AR — revertir a hour=22, minute=0 despues
+    scheduler.add_job(job_noche, trigger="cron", hour=0, minute=39, args=[app])
     scheduler.start()
     logger.info("Bot y scheduler iniciados.")
     app.run_polling(drop_pending_updates=True)
