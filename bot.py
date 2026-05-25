@@ -38,6 +38,23 @@ def init_db():
         )
         """
     )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feriados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS planes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE,
+            contenido TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -77,18 +94,52 @@ def delete_fecha_by_index(index: int) -> bool:
     return True
 
 
+# ── Feriados ──────────────────────────────────────────────────────────────────
+
+def save_feriado(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO feriados (fecha) VALUES (?)", (fecha,))
+    conn.commit()
+    conn.close()
+
+
+def get_feriados():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT id, fecha FROM feriados ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_feriado_by_index(index: int) -> bool:
+    rows = get_feriados()
+    if index < 1 or index > len(rows):
+        return False
+    row_id = rows[index - 1][0]
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM feriados WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def is_feriado(fecha: str) -> bool:
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM feriados WHERE fecha = ?", (fecha,))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+
+# ── Planes ────────────────────────────────────────────────────────────────────
+
 def save_plan(fecha: str, contenido: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS planes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT NOT NULL UNIQUE,
-            contenido TEXT NOT NULL
-        )
-        """
-    )
     c.execute(
         "INSERT OR REPLACE INTO planes (fecha, contenido) VALUES (?, ?)",
         (fecha, contenido),
@@ -100,15 +151,6 @@ def save_plan(fecha: str, contenido: str):
 def get_plan(fecha: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS planes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT NOT NULL UNIQUE,
-            contenido TEXT NOT NULL
-        )
-        """
-    )
     c.execute("SELECT contenido FROM planes WHERE fecha = ?", (fecha,))
     row = c.fetchone()
     conn.close()
@@ -158,7 +200,7 @@ PROYECTOS Y DEADLINES:
 FECHAS PRÓXIMAS CARGADAS:
 {fechas_db}
 
-Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
+{contexto_feriado}Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
 
 REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - No uses markdown: sin #, ##, **, ni ---
@@ -179,6 +221,7 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - Las tareas de estudio deben ser ESPECÍFICAS: no "estudiar MUN" sino "redactar posición de Liberia sobre financiamiento de misiones de paz".
 - Priorizá por urgencia (deadline más cercano primero).
 - Si el día siguiente no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
+- Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
 """
 
 # ── Claude ────────────────────────────────────────────────────────────────────
@@ -208,6 +251,12 @@ def generar_plan_texto() -> str:
     else:
         fechas_str = "No hay fechas cargadas."
 
+    # Verificar si mañana es feriado
+    if is_feriado(fecha_manana):
+        contexto_feriado = "DÍA ESPECIAL: Mañana es feriado o no hay colegio. No incluyas bloque de colegio ni horario de levantarse a las 7:30. Tratalo como día libre — Franco puede organizar su tiempo desde cuando quiera. Mantené los entrenamientos si corresponde al día de la semana.\n\n"
+    else:
+        contexto_feriado = ""
+
     prompt = PROMPT_TEMPLATE.format(
         fechas_db=fechas_str,
         dia_semana=dia_semana,
@@ -215,6 +264,7 @@ def generar_plan_texto() -> str:
         dia_manana=dia_manana,
         dia_manana_upper=dia_manana_upper,
         fecha_manana=fecha_manana,
+        contexto_feriado=contexto_feriado,
     )
 
     message = client.messages.create(
@@ -237,8 +287,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/fecha DD/MM/AAAA | Evento | Material — guardar una fecha\n"
         "/fechas — ver fechas próximas\n"
         "/borrar N — borrar la fecha número N\n"
+        "/feriado DD/MM/AAAA — marcar un día como feriado\n"
+        "/feriados — ver feriados cargados\n"
+        "/borrarf N — borrar el feriado número N\n"
         "/plan — ver el plan de hoy\n"
         "/generar — generar el plan de mañana ahora\n"
+        "/semana — ver eventos de esta semana\n"
+        "/mes — ver eventos de los próximos 30 días\n"
         "/proyectos — ver proyectos activos\n"
         "/rutina — ver rutina semanal\n\n"
         "El plan del día siguiente se genera automáticamente a las 22:00 🕙"
@@ -274,14 +329,12 @@ async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, (_, fecha, evento, material) in enumerate(rows, 1):
         mat = f" (Material: {material})" if material else ""
         lines.append(f"{i}. {fecha} — {evento}{mat}")
-    await update.message.reply_text(
-        "📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines)
-    )
+    await update.message.reply_text("📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines))
 
 
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ Uso: /borrar N (el número de la fecha en la lista)")
+        await update.message.reply_text("❌ Uso: /borrar N")
         return
     try:
         n = int(context.args[0])
@@ -293,6 +346,45 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🗑 Fecha #{n} eliminada.")
     else:
         await update.message.reply_text(f"❌ No existe la fecha número {n}.")
+
+
+async def cmd_feriado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Uso: /feriado DD/MM/AAAA")
+        return
+    fecha = context.args[0].strip()
+    try:
+        datetime.strptime(fecha, "%d/%m/%Y")
+    except ValueError:
+        await update.message.reply_text("❌ Fecha inválida. Usá el formato DD/MM/AAAA")
+        return
+    save_feriado(fecha)
+    await update.message.reply_text(f"🏖 Feriado guardado: {fecha}")
+
+
+async def cmd_feriados(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = get_feriados()
+    if not rows:
+        await update.message.reply_text("📭 No hay feriados cargados.")
+        return
+    lines = [f"{i}. {fecha}" for i, (_, fecha) in enumerate(rows, 1)]
+    await update.message.reply_text("🏖 FERIADOS:\n\n" + "\n".join(lines))
+
+
+async def cmd_borrarf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❌ Uso: /borrarf N")
+        return
+    try:
+        n = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ El argumento debe ser un número.")
+        return
+    ok = delete_feriado_by_index(n)
+    if ok:
+        await update.message.reply_text(f"🗑 Feriado #{n} eliminado.")
+    else:
+        await update.message.reply_text(f"❌ No existe el feriado número {n}.")
 
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -315,6 +407,63 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error generando plan: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan: {e}")
+
+
+async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    hoy = datetime.now(AR_TZ)
+    # Lunes de la semana actual
+    lunes = hoy - timedelta(days=hoy.weekday())
+    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    # Armar dict de fechas con eventos
+    rows = get_fechas()
+    eventos_por_fecha = {}
+    for (_, fecha, evento, _material) in rows:
+        eventos_por_fecha.setdefault(fecha, []).append(evento)
+
+    lines = []
+    for i in range(7):
+        dia = lunes + timedelta(days=i)
+        fecha_str = dia.strftime("%d/%m/%Y")
+        nombre_dia = dias_es[i]
+        fecha_display = dia.strftime("%d/%m")
+        if fecha_str in eventos_por_fecha:
+            eventos = ", ".join(eventos_por_fecha[fecha_str])
+            lines.append(f"{nombre_dia} {fecha_display} — {eventos}")
+        else:
+            lines.append(f"{nombre_dia} {fecha_display} — Sin eventos")
+
+    semana_inicio = lunes.strftime("%d/%m")
+    semana_fin = (lunes + timedelta(days=6)).strftime("%d/%m")
+    texto = f"📅 SEMANA DEL {semana_inicio} AL {semana_fin}\n\n" + "\n".join(lines)
+    await update.message.reply_text(texto)
+
+
+async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    hoy = datetime.now(AR_TZ)
+    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    rows = get_fechas()
+    eventos_por_fecha = {}
+    for (_, fecha, evento, _material) in rows:
+        eventos_por_fecha.setdefault(fecha, []).append(evento)
+
+    lines = []
+    for i in range(1, 31):
+        dia = hoy + timedelta(days=i)
+        fecha_str = dia.strftime("%d/%m/%Y")
+        if fecha_str in eventos_por_fecha:
+            nombre_dia = dias_es[dia.weekday()]
+            fecha_display = dia.strftime("%d/%m")
+            eventos = ", ".join(eventos_por_fecha[fecha_str])
+            lines.append(f"{nombre_dia} {fecha_display} — {eventos}")
+
+    if not lines:
+        await update.message.reply_text("📭 No hay eventos cargados en los próximos 30 días.")
+        return
+
+    texto = "📅 PRÓXIMOS 30 DÍAS\n\n" + "\n".join(lines)
+    await update.message.reply_text(texto)
 
 
 async def cmd_proyectos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -350,8 +499,13 @@ def main():
     app.add_handler(CommandHandler("fecha", cmd_fecha))
     app.add_handler(CommandHandler("fechas", cmd_fechas))
     app.add_handler(CommandHandler("borrar", cmd_borrar))
+    app.add_handler(CommandHandler("feriado", cmd_feriado))
+    app.add_handler(CommandHandler("feriados", cmd_feriados))
+    app.add_handler(CommandHandler("borrarf", cmd_borrarf))
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("generar", cmd_generar))
+    app.add_handler(CommandHandler("semana", cmd_semana))
+    app.add_handler(CommandHandler("mes", cmd_mes))
     app.add_handler(CommandHandler("proyectos", cmd_proyectos))
     app.add_handler(CommandHandler("rutina", cmd_rutina))
 
