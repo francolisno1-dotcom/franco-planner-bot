@@ -53,7 +53,7 @@ def init_db():
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTR rutina_modificada (
+        CREATE TABLE IF NOT EXISTS rutina_modificada (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT NOT NULL UNIQUE,
             descripcion TEXT NOT NULL
