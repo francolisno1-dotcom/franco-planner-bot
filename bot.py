@@ -410,60 +410,164 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Generando plan, esperá un momento…")
+
     hoy = datetime.now(AR_TZ)
-    # Lunes de la semana actual
-    lunes = hoy - timedelta(days=hoy.weekday())
-    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    fecha_hoy = hoy.strftime("%d/%m/%Y")
+    fecha_7dias = (hoy + timedelta(days=7)).strftime("%d/%m/%Y")
 
-    # Armar dict de fechas con eventos
-    rows = get_fechas()
-    eventos_por_fecha = {}
-    for (_, fecha, evento, _material) in rows:
-        eventos_por_fecha.setdefault(fecha, []).append(evento)
+    conn = sqlite3.connect("planner.db")
+    cur = conn.cursor()
+    cur.execute("SELECT fecha, evento FROM fechas ORDER BY fecha")
+    rows = cur.fetchall()
+    conn.close()
 
-    lines = []
-    for i in range(7):
-        dia = lunes + timedelta(days=i)
-        fecha_str = dia.strftime("%d/%m/%Y")
-        nombre_dia = dias_es[i]
-        fecha_display = dia.strftime("%d/%m")
-        if fecha_str in eventos_por_fecha:
-            eventos = ", ".join(eventos_por_fecha[fecha_str])
-            lines.append(f"{nombre_dia} {fecha_display} — {eventos}")
-        else:
-            lines.append(f"{nombre_dia} {fecha_display} — Sin eventos")
+    if rows:
+        fechas_str = "\n".join(f"- {fecha}: {evento}" for (fecha, evento) in rows)
+    else:
+        fechas_str = "No hay fechas cargadas."
 
-    semana_inicio = lunes.strftime("%d/%m")
-    semana_fin = (lunes + timedelta(days=6)).strftime("%d/%m")
-    texto = f"📅 SEMANA DEL {semana_inicio} AL {semana_fin}\n\n" + "\n".join(lines)
-    await update.message.reply_text(texto)
+    prompt = (
+        "Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.\n"
+        "\n"
+        "RUTINA SEMANAL:\n"
+        "- Lunes: estudio disponible 22:00-22:30\n"
+        "- Martes: estudio disponible 22:00-22:30\n"
+        "- Miércoles: estudio disponible 22:00-22:30\n"
+        "- Jueves: estudio disponible 22:00-22:30\n"
+        "- Viernes: estudio disponible 20:30-22:30\n"
+        "- Sábado: tarde libre\n"
+        "- Domingo: tarde libre\n"
+        "\n"
+        "PROYECTOS ACTIVOS:\n"
+        "- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.\n"
+        "- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.\n"
+        "- Debate WSDC — práctica continua.\n"
+        "- NASA ISSDC DESLA — preparación continua.\n"
+        "- Materias IGCSE — siempre al día.\n"
+        "- Marketing/Instagram — sin deadline.\n"
+        "\n"
+        f"FECHAS CARGADAS:\n{fechas_str}\n"
+        "\n"
+        f"Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 7 días ({fecha_hoy} al {fecha_7dias}).\n"
+        "\n"
+        "El plan debe:\n"
+        "- Distribuir la preparación de forma inteligente según los días que faltan para cada deadline\n"
+        "- Priorizar por urgencia (deadline más cercano primero)\n"
+        "- Asignar tareas específicas a cada día, no genéricas\n"
+        "- Respetar los slots de estudio disponibles según el día de la semana\n"
+        "- Los fines de semana tienen más tiempo libre disponible\n"
+        "\n"
+        "FORMATO — seguílo estrictamente, sin markdown:\n"
+        "\n"
+        "📅 SEMANA DEL [DD/MM] AL [DD/MM]\n"
+        "\n"
+        "[Día] [DD/MM]\n"
+        "→ [Proyecto]: [tarea específica]\n"
+        "→ [Proyecto]: [tarea específica]\n"
+        "\n"
+        "[Día] [DD/MM]\n"
+        "→ [Proyecto]: [tarea específica]\n"
+        "\n"
+        "(Si un día no tiene nada asignado, no lo incluyas)"
+    )
+
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    plan = message.content[0].text
+
+    if len(plan) > 4096:
+        mid = len(plan) // 2
+        corte = plan.rfind("\n", 0, mid)
+        if corte == -1:
+            corte = mid
+        await update.message.reply_text(plan[:corte])
+        await update.message.reply_text(plan[corte:].lstrip())
+    else:
+        await update.message.reply_text(plan)
 
 
 async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Generando plan, esperá un momento…")
+
     hoy = datetime.now(AR_TZ)
-    dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    fecha_hoy = hoy.strftime("%d/%m/%Y")
+    fecha_30dias = (hoy + timedelta(days=30)).strftime("%d/%m/%Y")
 
-    rows = get_fechas()
-    eventos_por_fecha = {}
-    for (_, fecha, evento, _material) in rows:
-        eventos_por_fecha.setdefault(fecha, []).append(evento)
+    conn = sqlite3.connect("planner.db")
+    cur = conn.cursor()
+    cur.execute("SELECT fecha, evento FROM fechas ORDER BY fecha")
+    rows = cur.fetchall()
+    conn.close()
 
-    lines = []
-    for i in range(1, 31):
-        dia = hoy + timedelta(days=i)
-        fecha_str = dia.strftime("%d/%m/%Y")
-        if fecha_str in eventos_por_fecha:
-            nombre_dia = dias_es[dia.weekday()]
-            fecha_display = dia.strftime("%d/%m")
-            eventos = ", ".join(eventos_por_fecha[fecha_str])
-            lines.append(f"{nombre_dia} {fecha_display} — {eventos}")
+    if rows:
+        fechas_str = "\n".join(f"- {fecha}: {evento}" for (fecha, evento) in rows)
+    else:
+        fechas_str = "No hay fechas cargadas."
 
-    if not lines:
-        await update.message.reply_text("📭 No hay eventos cargados en los próximos 30 días.")
-        return
+    prompt = (
+        "Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.\n"
+        "\n"
+        "RUTINA SEMANAL:\n"
+        "- Lunes: estudio disponible 22:00-22:30\n"
+        "- Martes: estudio disponible 22:00-22:30\n"
+        "- Miércoles: estudio disponible 22:00-22:30\n"
+        "- Jueves: estudio disponible 22:00-22:30\n"
+        "- Viernes: estudio disponible 20:30-22:30\n"
+        "- Sábado: tarde libre\n"
+        "- Domingo: tarde libre\n"
+        "\n"
+        "PROYECTOS ACTIVOS:\n"
+        "- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.\n"
+        "- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.\n"
+        "- Debate WSDC — práctica continua.\n"
+        "- NASA ISSDC DESLA — preparación continua.\n"
+        "- Materias IGCSE — siempre al día.\n"
+        "- Marketing/Instagram — sin deadline.\n"
+        "\n"
+        f"FECHAS CARGADAS:\n{fechas_str}\n"
+        "\n"
+        f"Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 30 días ({fecha_hoy} al {fecha_30dias}).\n"
+        "\n"
+        "El plan debe:\n"
+        "- Distribuir la preparación de forma inteligente según los días que faltan para cada deadline\n"
+        "- Priorizar por urgencia (deadline más cercano primero)\n"
+        "- Asignar tareas específicas a cada día, no genéricas\n"
+        "- Respetar los slots de estudio disponibles según el día de la semana\n"
+        "- Los fines de semana tienen más tiempo libre disponible\n"
+        "\n"
+        "FORMATO — seguílo estrictamente, sin markdown:\n"
+        "\n"
+        "📅 PRÓXIMOS 30 DÍAS\n"
+        "\n"
+        "[Día] [DD/MM]\n"
+        "→ [Proyecto]: [tarea específica]\n"
+        "\n"
+        "[Día] [DD/MM]\n"
+        "→ [Proyecto]: [tarea específica]\n"
+        "\n"
+        "(Solo incluí días con tareas asignadas)"
+    )
 
-    texto = "📅 PRÓXIMOS 30 DÍAS\n\n" + "\n".join(lines)
-    await update.message.reply_text(texto)
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    plan = message.content[0].text
+
+    if len(plan) > 4096:
+        mid = len(plan) // 2
+        corte = plan.rfind("\n", 0, mid)
+        if corte == -1:
+            corte = mid
+        await update.message.reply_text(plan[:corte])
+        await update.message.reply_text(plan[corte:].lstrip())
+    else:
+        await update.message.reply_text(plan)
 
 
 async def cmd_proyectos(update: Update, context: ContextTypes.DEFAULT_TYPE):
