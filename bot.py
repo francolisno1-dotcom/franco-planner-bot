@@ -4,8 +4,11 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes,
+)
 
 import anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -23,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Database ─────────────────────────────────────────────────────────────────
 
 def init_db():
     conn = sqlite3.connect("planner.db")
@@ -49,9 +52,15 @@ def init_db():
             contenido TEXT NOT NULL
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTR rutina_modificada (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE,
+            descripcion TEXT NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
-
 
 def get_fechas():
     conn = sqlite3.connect("planner.db")
@@ -63,14 +72,12 @@ def get_fechas():
     conn.close()
     return rows
 
-
 def save_fecha(fecha: str, evento: str, material: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute("INSERT INTO fechas (fecha, evento, material) VALUES (?, ?, ?)", (fecha, evento, material))
     conn.commit()
     conn.close()
-
 
 def delete_fecha_by_index(index: int) -> bool:
     rows = get_fechas()
@@ -84,14 +91,12 @@ def delete_fecha_by_index(index: int) -> bool:
     conn.close()
     return True
 
-
 def save_feriado(fecha: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO feriados (fecha) VALUES (?)", (fecha,))
     conn.commit()
     conn.close()
-
 
 def get_feriados():
     conn = sqlite3.connect("planner.db")
@@ -100,7 +105,6 @@ def get_feriados():
     rows = c.fetchall()
     conn.close()
     return rows
-
 
 def delete_feriado_by_index(index: int) -> bool:
     rows = get_feriados()
@@ -114,7 +118,6 @@ def delete_feriado_by_index(index: int) -> bool:
     conn.close()
     return True
 
-
 def is_feriado(fecha: str) -> bool:
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
@@ -123,14 +126,12 @@ def is_feriado(fecha: str) -> bool:
     conn.close()
     return result is not None
 
-
 def save_plan(fecha: str, contenido: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO planes (fecha, contenido) VALUES (?, ?)", (fecha, contenido))
     conn.commit()
     conn.close()
-
 
 def get_plan(fecha: str):
     conn = sqlite3.connect("planner.db")
@@ -140,10 +141,44 @@ def get_plan(fecha: str):
     conn.close()
     return row[0] if row else None
 
+def save_rutina_modificada(fecha: str, descripcion: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO rutina_modificada (fecha, descripcion) VALUES (?, ?)",
+        (fecha, descripcion),
+    )
+    conn.commit()
+    conn.close()
+
+def get_rutina_modificada(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT descripcion FROM rutina_modificada WHERE fecha = ?", (fecha,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def get_all_rutinas_modificadas():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT fecha, descripcion FROM rutina_modificada ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_rutina_modificada(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM rutina_modificada WHERE fecha = ?", (fecha,))
+    conn.commit()
+    conn.close()
 
 # ── Contexto hardcodeado ──────────────────────────────────────────────────────
 
-RUTINA = """🗓 RUTINA SEMANAL
+RUTINA_TEXTO = """🗓 RUTINA SEMANAL
 
 Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
 Martes: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
@@ -184,7 +219,7 @@ PROYECTOS Y DEADLINES:
 FECHAS PRÓXIMAS CARGADAS:
 {fechas_db}
 
-{contexto_feriado}Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
+{contexto_feriado}{contexto_rutina}Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
 
 REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - No uses markdown: sin #, ##, **, ni ---
@@ -203,7 +238,7 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 
 - Nada más. Sin secciones extra, sin justificaciones, sin resumen.
 - Las tareas de estudio deben ser ESPECÍFICAS: no "estudiar MUN" sino "redactar posición de Liberia sobre financiamiento de misiones de paz".
-- Priorizá por urgencia (deadline más cercano primero).
+- Priorizá por orgencia (deadline más cercano primero).
 - Si el día siguiente no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
 - Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
 """
@@ -235,7 +270,7 @@ Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 7 días.
 IMPORTANTE:
 - Máximo 2 tareas por día
 - Una línea por tarea, sin explicaciones ni justificaciones
-- Distribuí por urgencia, deadline más cercano primero
+- Distribuí por orgencia, deadline más cercano primero
 - Respetá los slots de estudio según el día
 
 FORMATO — sin markdown, sin símbolos extra:
@@ -276,7 +311,7 @@ Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 30 días.
 IMPORTANTE:
 - Máximo 2 tareas por día
 - Una línea por tarea, sin explicaciones ni justificaciones
-- Distribuí por urgencia, deadline más cercano primero
+- Distribuí por orgencia, deadline más cercano primero
 - Respetá los slots de estudio según el día
 
 FORMATO — sin markdown, sin símbolos extra:
@@ -315,9 +350,22 @@ def generar_plan_texto():
     ) if rows else "No hay fechas cargadas."
 
     if is_feriado(fecha_manana):
-        contexto_feriado = "DÍA ESPECIAL: Mañana es feriado o no hay colegio. No incluyas bloque de colegio ni horario de levantarse a las 7:30. Tratalo como día libre — Franco puede organizar su tiempo desde cuando quiera. Mantené los entrenamientos si corresponde al día de la semana.\n\n"
+        contexto_feriado = (
+            "DÍA ESPECIAL: Mañana es feriado o no hay colegio. No incluyas bloque de colegio "
+            "ni horario de levantarse a las 7:30. Tratalo como día libre — Franco puede organizar "
+            "su tiempo desde cuando quiera. Mantené los entrenamientos si corresponde al día de la semana.\n\n"
+        )
     else:
         contexto_feriado = ""
+
+    rutina_mod = get_rutina_modificada(fecha_manana)
+    if rutina_mod:
+        contexto_rutina = (
+            f"CAMBIO DE RUTINA PARA MAÑANA: {rutina_mod}\n"
+            "Tené esto en cuenta al armar el plan y ajustá los horarios accordingly.\n\n"
+        )
+    else:
+        contexto_rutina = ""
 
     prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
@@ -327,6 +375,7 @@ def generar_plan_texto():
         dia_manana_upper=dia_manana_upper,
         fecha_manana=fecha_manana,
         contexto_feriado=contexto_feriado,
+        contexto_rutina=contexto_rutina,
     )
 
     message = client.messages.create(
@@ -340,17 +389,15 @@ def generar_plan_texto():
     return plan, fecha_manana
 
 
-async def _enviar_plan_multipartes(update, texto: str):
-    """Envía el texto en partes si supera 4096 chars. Divide por líneas de días."""
+async def _enviar_plan_multipartes(reply_obj, texto: str):
+    """Envía el texto en partes si supera 4096 chars. reply_obj es update.message o query.message."""
     if len(texto) <= 4096:
-        await update.message.reply_text(texto)
+        await reply_obj.reply_text(texto)
         return
 
-    # Intentar dividir en bloques de días (líneas que empiezan con nombre de día)
     lineas = texto.split("\n")
     dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    # Encontrar índices donde empiezan los días
     indices_dias = []
     for i, linea in enumerate(lineas):
         for nombre in dias_nombres:
@@ -359,44 +406,74 @@ async def _enviar_plan_multipartes(update, texto: str):
                 break
 
     if len(indices_dias) >= 2:
-        # Dividir: días 1-4 en primera parte, resto en segunda
         corte = indices_dias[min(4, len(indices_dias) - 1)]
         parte1 = "\n".join(lineas[:corte]).strip()
         parte2 = "\n".join(lineas[corte:]).strip()
         if parte1:
-            await update.message.reply_text(parte1)
+            await reply_obj.reply_text(parte1)
         if parte2:
-            await update.message.reply_text(parte2)
+            await reply_obj.reply_text(parte2)
     else:
-        # Fallback: cortar en 4096 chars en un salto de línea
         chunk1 = texto[:4000].rsplit("\n", 1)[0]
         chunk2 = texto[len(chunk1):].strip()
-        await update.message.reply_text(chunk1)
+        await reply_obj.reply_text(chunk1)
         if chunk2:
-            await update.message.reply_text(chunk2)
+            await reply_obj.reply_text(chunk2)
 
+# ── Keyboards ─────────────────────────────────────────────────────────────────
+
+def _build_main_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📅 Plan de hoy", callback_data="plan"),
+            InlineKeyboardButton("⚡ Generar plan", callback_data="generar"),
+        ],
+        [
+            InlineKeyboardButton("📆 Esta semana", callback_data="semana"),
+            InlineKeyboardButton("🗓️ Este mes", callback_data="mes"),
+        ],
+        [
+            InlineKeyboardButton("➕ Cargar fecha", callback_data="cargar_fecha"),
+            InlineKeyboardButton("📋 Ver fechas", callback_data="fechas"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Cambiar rutina", callback_data="cambiar_rutina"),
+            InlineKeyboardButton("📚 Proyectos", callback_data="proyectos"),
+        ],
+    ])
+
+def _build_dias_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Lunes", callback_data="rutina_dia_lunes"),
+            InlineKeyboardButton("Martes", callback_data="rutina_dia_martes"),
+            InlineKeyboardButton("Miércoles", callback_data="rutina_dia_miercoles"),
+        ],
+        [
+            InlineKeyboardButton("Jueves", callback_data="rutina_dia_jueves"),
+            InlineKeyboardButton("Viernes", callback_data="rutina_dia_viernes"),
+        ],
+        [
+            InlineKeyboardButton("Sábado", callback_data="rutina_dia_sabado"),
+            InlineKeyboardButton("Domingo", callback_data="rutina_dia_domingo"),
+        ],
+    ])
+
+def _build_cambio_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Sin entrenamiento", callback_data="rutina_sin_entreno")],
+        [InlineKeyboardButton("🕐 Cambiar horario", callback_data="rutina_cambiar_horario")],
+        [InlineKeyboardButton("📝 Escribir manualmente", callback_data="rutina_manual")],
+    ])
 
 # ── Comandos Telegram ─────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
     await update.message.reply_text(
-        "👋 Hola Franco! Soy tu planificador personal.\n\n"
-        "Comandos disponibles:\n"
-        "/fecha DD/MM/AAAA | Evento | Material — guardar una fecha\n"
-        "/fechas — ver fechas próximas\n"
-        "/borrar N — borrar la fecha número N\n"
-        "/feriado DD/MM/AAAA — marcar un día como feriado\n"
-        "/feriados — ver feriados cargados\n"
-        "/borrarf N — borrar el feriado número N\n"
-        "/plan — ver el plan de hoy\n"
-        "/generar — generar el plan de mañana ahora\n"
-        "/semana — plan de estudio para los próximos 7 días\n"
-        "/mes — plan de estudio para los próximos 30 días\n"
-        "/proyectos — ver proyectos activos\n"
-        "/rutina — ver rutina semanal\n\n"
-        "El plan del día siguiente se genera automáticamente a las 22:00 🕙"
+        "👋 Hola Franco! ¿Qué hacemos?",
+        reply_markup=_build_main_keyboard(),
     )
-
 
 async def cmd_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = " ".join(context.args)
@@ -415,7 +492,6 @@ async def cmd_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_fecha(fecha, evento, material)
     await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}")
 
-
 async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = get_fechas()
     if not rows:
@@ -426,7 +502,6 @@ async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mat = f" (Material: {material})" if material else ""
         lines.append(f"{i}. {fecha} — {evento}{mat}")
     await update.message.reply_text("📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines))
-
 
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -443,7 +518,6 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ No existe la fecha número {n}.")
 
-
 async def cmd_feriado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("❌ Uso: /feriado DD/MM/AAAA")
@@ -457,7 +531,6 @@ async def cmd_feriado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_feriado(fecha)
     await update.message.reply_text(f"🏖 Feriado guardado: {fecha}")
 
-
 async def cmd_feriados(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = get_feriados()
     if not rows:
@@ -465,7 +538,6 @@ async def cmd_feriados(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lines = [f"{i}. {fecha}" for i, (_, fecha) in enumerate(rows, 1)]
     await update.message.reply_text("🏖 FERIADOS:\n\n" + "\n".join(lines))
-
 
 async def cmd_borrarf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -482,7 +554,6 @@ async def cmd_borrarf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ No existe el feriado número {n}.")
 
-
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoy = datetime.now(AR_TZ).strftime("%d/%m/%Y")
     plan = get_plan(hoy)
@@ -494,7 +565,6 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Usá /generar para crear el plan de mañana."
         )
 
-
 async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Generando plan con Claude, esperá un momento...")
     try:
@@ -504,7 +574,6 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error generando plan: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan: {e}")
 
-
 async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Generando plan, esperá un momento...")
     try:
@@ -512,30 +581,21 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ahora_ar = datetime.now(AR_TZ)
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
         fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
-
         rows = get_fechas()
         fechas_str = "\n".join(
             f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
             for r in rows
         ) if rows else "No hay fechas cargadas."
-
-        prompt = PROMPT_SEMANA.format(
-            fechas_db=fechas_str,
-            fecha_hoy=fecha_hoy,
-            fecha_fin=fecha_fin,
-        )
-
+        prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
-        texto = message.content[0].text
-        await _enviar_plan_multipartes(update, texto)
+        await _enviar_plan_multipartes(update.message, message.content[0].text)
     except Exception as e:
         logger.error(f"Error en /semana: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
-
 
 async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Generando plan, esperá un momento...")
@@ -543,37 +603,261 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
         ahora_ar = datetime.now(AR_TZ)
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-
         rows = get_fechas()
         fechas_str = "\n".join(
             f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
             for r in rows
         ) if rows else "No hay fechas cargadas."
-
-        prompt = PROMPT_MES.format(
-            fechas_db=fechas_str,
-            fecha_hoy=fecha_hoy,
-        )
-
+        prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
-        texto = message.content[0].text
-        await _enviar_plan_multipartes(update, texto)
+        await _enviar_plan_multipartes(update.message, message.content[0].text)
     except Exception as e:
         logger.error(f"Error en /mes: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan mensual: {e}")
 
-
 async def cmd_proyectos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(PROYECTOS)
 
-
 async def cmd_rutina(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(RUTINA)
+    mods = get_all_rutinas_modificadas()
+    texto = RUTINA_TEXTO
+    if mods:
+        texto += "\n\n📝 CAMBIOS GUARDADOS:"
+        keyboard_rows = []
+        for fecha, descripcion in mods:
+            texto += f"\n• {fecha}: {descripcion}"
+            keyboard_rows.append([
+                InlineKeyboardButton(f"🗑️ Borrar cambio {fecha}", callback_data=f"del_rutina|{fecha}")
+            ])
+        await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(keyboard_rows))
+    else:
+        await update.message.reply_text(texto)
 
+# ── Callback Handler ──────────────────────────────────────────────────────────
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "plan":
+        hoy = datetime.now(AR_TZ).strftime("%d/%m/%Y")
+        plan = get_plan(hoy)
+        if plan:
+            await query.edit_message_text(f"📋 Plan para hoy ({hoy}):\n\n{plan}")
+        else:
+            await query.edit_message_text(
+                f"📭 No hay plan guardado para hoy ({hoy}).\n"
+                "Tocá ⚡ Generar plan para crear el plan de mañana."
+            )
+
+    elif data == "generar":
+        await query.edit_message_text("⏳ Generando plan con Claude, esperá un momento...")
+        try:
+            plan, fecha = generar_plan_texto()
+            await query.message.reply_text(f"Plan generado para {fecha}:\n\n{plan}")
+        except Exception as e:
+            logger.error(f"Error generando plan: {e}")
+            await query.message.reply_text(f"❌ Error al generar el plan: {e}")
+
+    elif data == "semana":
+        await query.edit_message_text("⏳ Generando plan semanal, esperá un momento...")
+        try:
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
+            ahora_ar = datetime.now(AR_TZ)
+            fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
+            fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
+            rows = get_fechas()
+            fechas_str = "\n".join(
+                f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
+                for r in rows
+            ) if rows else "No hay fechas cargadas."
+            prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            await _enviar_plan_multipartes(query.message, message.content[0].text)
+        except Exception as e:
+            logger.error(f"Error en semana callback: {e}")
+            await query.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
+
+    elif data == "mes":
+        await query.edit_message_text("⏳ Generando plan mensual, esperá un momento...")
+        try:
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
+            ahora_ar = datetime.now(AR_TZ)
+            fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
+            rows = get_fechas()
+            fechas_str = "\n".join(
+                f"- {r[1]}: {r[2]}" + (f" (Material: {r[3]})" if r[3] else "")
+                for r in rows
+            ) if rows else "No hay fechas cargadas."
+            prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            await _enviar_plan_multipartes(query.message, message.content[0].text)
+        except Exception as e:
+            logger.error(f"Error en mes callback: {e}")
+            await query.message.reply_text(f"❌ Error al generar el plan mensual: {e}")
+
+    elif data == "cargar_fecha":
+        context.user_data['estado'] = 'esperando_fecha_nueva'
+        await query.edit_message_text(
+            "Mandame la fecha en este formato:\n"
+            "📝 DD/MM/AAAA | Evento | Material\n\n"
+            "Ejemplo:\n"
+            "15/06/2026 | Examen Biology | Chapter 4 Kognity"
+        )
+
+    elif data == "fechas":
+        rows = get_fechas()
+        if not rows:
+            await query.edit_message_text("📭 No hay fechas cargadas.")
+        else:
+            lines = []
+            for i, (_, fecha, evento, material) in enumerate(rows, 1):
+                mat = f" (Material: {material})" if material else ""
+                lines.append(f"{i}. {fecha} — {evento}{mat}")
+            await query.edit_message_text("📅 FECHAS PRÓXIMAS:\n\n" + "\n".join(lines))
+
+    elif data == "proyectos":
+        await query.edit_message_text(PROYECTOS)
+
+    elif data == "cambiar_rutina":
+        await query.edit_message_text(
+            "¿Para qué día querés cambiar la rutina?",
+            reply_markup=_build_dias_keyboard(),
+        )
+
+    elif data.startswith("rutina_dia_"):
+        dia_map = {
+            "rutina_dia_lunes": "Lunes",
+            "rutina_dia_martes": "Martes",
+            "rutina_dia_miercoles": "Miércoles",
+            "rutina_dia_jueves": "Jueves",
+            "rutina_dia_viernes": "Viernes",
+            "rutina_dia_sabado": "Sábado",
+            "rutina_dia_domingo": "Domingo",
+        }
+        dia = dia_map.get(data, "ese día")
+        context.user_data['estado'] = 'esperando_fecha_rutina'
+        context.user_data['rutina_dia'] = dia
+        await query.edit_message_text(
+            f"¿Para qué fecha querés cambiar el {dia}?\n"
+            "Mandame la fecha: DD/MM/AAAA"
+        )
+
+    elif data == "rutina_sin_entreno":
+        fecha = context.user_data.get('rutina_fecha', '')
+        if not fecha:
+            await query.edit_message_text("❌ Error: no tengo la fecha guardada. Volvé a empezar desde el menú.")
+            return
+        save_rutina_modificada(fecha, "Sin entrenamiento ese día. El tiempo del entreno queda libre.")
+        context.user_data.clear()
+        await query.edit_message_text(
+            f"✅ Guardado: el {fecha} no hay entrenamiento. Lo voy a tener en cuenta al generar el plan."
+        )
+
+    elif data == "rutina_cambiar_horario":
+        fecha = context.user_data.get('rutina_fecha', '')
+        if not fecha:
+            await query.edit_message_text("❌ Error: no tengo la fecha guardada. Volvé a empezar desde el menú.")
+            return
+        context.user_data['estado'] = 'esperando_horario_rutina'
+        await query.edit_message_text("¿A qué horario? (ejemplo: 20:00-21:00)")
+
+    elif data == "rutina_manual":
+        fecha = context.user_data.get('rutina_fecha', '')
+        if not fecha:
+            await query.edit_message_text("❌ Error: no tengo la fecha guardada. Volvé a empezar desde el menú.")
+            return
+        context.user_data['estado'] = 'esperando_descripcion_rutina'
+        await query.edit_message_text(
+            "Describí el cambio:\n"
+            "(ej: Me corto el pelo de 18:00 a 19:00, llego a casa a las 19:30)"
+        )
+
+    elif data.startswith("del_rutina|"):
+        fecha = data.split("|", 1)[1]
+        delete_rutina_modificada(fecha)
+        await query.edit_message_text(f"🗑️ Cambio de rutina para {fecha} eliminado.")
+
+# ── Message Handler ───────────────────────────────────────────────────────────
+
+async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text.strip()
+    estado = context.user_data.get('estado')
+
+    if estado == 'esperando_fecha_nueva':
+        partes = [p.strip() for p in texto.split("|")]
+        if len(partes) < 2:
+            await update.message.reply_text(
+                "❌ Formato incorrecto. Usá:\n"
+                "DD/MM/AAAA | Evento | Material\n\n"
+                "Ejemplo:\n15/06/2026 | Examen Biology | Chapter 4 Kognity"
+            )
+            return
+        fecha = partes[0]
+        evento = partes[1]
+        material = partes[2] if len(partes) >= 3 else ""
+        try:
+            datetime.strptime(fecha, "%d/%m/%Y")
+        except ValueError:
+            await update.message.reply_text("❌ Fecha inválida. Usá el formato DD/MM/AAAA")
+            return
+        save_fecha(fecha, evento, material)
+        context.user_data.clear()
+        await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}")
+
+    elif estado == 'esperando_fecha_rutina':
+        try:
+            datetime.strptime(texto, "%d/%m/%Y")
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Fecha inválida. Mandame la fecha en formato DD/MM/AAAA"
+            )
+            return
+        context.user_data['rutina_fecha'] = texto
+        context.user_data['estado'] = None
+        dia = context.user_data.get('rutina_dia', 'ese día')
+        await update.message.reply_text(
+            f"Perfecto, ¿qué cambia el {dia} {texto}?",
+            reply_markup=_build_cambio_keyboard(),
+        )
+
+    elif estado == 'esperando_horario_rutina':
+        fecha = context.user_data.get('rutina_fecha', '')
+        dia = context.user_data.get('rutina_dia', '')
+        descripcion = f"El entrenamiento de {dia} cambia de horario: {texto}"
+        save_rutina_modificada(fecha, descripcion)
+        context.user_data.clear()
+        await update.message.reply_text(
+            f"✅ Guardado: el {fecha} el entrenamiento es a las {texto}. Lo voy a tener en cuenta al generar el plan."
+        )
+
+    elif estado == 'esperando_descripcion_rutina':
+        fecha = context.user_data.get('rutina_fecha', '')
+        save_rutina_modificada(fecha, texto)
+        context.user_data.clear()
+        await update.message.reply_text(
+            f"✅ Guardado para el {fecha}: {texto}. Lo voy a tener en cuenta al generar el plan."
+        )
+
+    elif texto.lower() in ['hola', 'menu', 'menú']:
+        context.user_data.clear()
+        await update.message.reply_text(
+            "👋 Hola Franco! ¿Qué hacemos?",
+            reply_markup=_build_main_keyboard(),
+        )
 
 # ── Cron job ──────────────────────────────────────────────────────────────────
 
@@ -587,7 +871,6 @@ async def job_noche(app):
     except Exception as e:
         logger.error(f"Error en cron job: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar el plan automático: {e}")
-
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -610,6 +893,12 @@ def main():
     app.add_handler(CommandHandler("proyectos", cmd_proyectos))
     app.add_handler(CommandHandler("rutina", cmd_rutina))
 
+    # Botones inline
+    app.add_handler(CallbackQueryHandler(handle_callback))
+
+    # Mensajes de texto (hola/menu + estados de conversación)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
+
     # Scheduler — 22:00 hora Argentina
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
     scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
@@ -618,7 +907,6 @@ def main():
 
     logger.info("Bot iniciado.")
     app.run_polling(drop_pending_updates=True)
-
 
 if __name__ == "__main__":
     main()
