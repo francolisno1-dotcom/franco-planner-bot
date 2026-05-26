@@ -320,6 +320,9 @@ PROYECTOS ACTIVOS:
 FECHAS CARGADAS:
 {fechas_db}
 
+CALENDARIO EXACTO — usá ÚNICAMENTE estos nombres de día para cada fecha, sin modificarlos:
+{calendario_semana}
+
 Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 7 días.
 
 IMPORTANTE:
@@ -361,6 +364,9 @@ PROYECTOS ACTIVOS:
 FECHAS CARGADAS:
 {fechas_db}
 
+CALENDARIO EXACTO — usá ÚNICAMENTE estos nombres de día para cada fecha, sin modificarlos:
+{calendario_mes}
+
 Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 30 días.
 
 IMPORTANTE:
@@ -379,6 +385,20 @@ FORMATO — sin markdown, sin símbolos extra:
 
 (Solo incluir días que tengan algo asignado)
 """
+
+# ── Helpers de calendario ─────────────────────────────────────────────────────
+
+def _calendario_dias(fecha_inicio: datetime, n_dias: int) -> str:
+    """Genera lista de días con nombre de día correcto (calculado por Python) para el prompt."""
+    dias_es = {
+        0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves",
+        4: "Viernes", 5: "Sábado", 6: "Domingo",
+    }
+    lineas = []
+    for i in range(n_dias):
+        dia = fecha_inicio + timedelta(days=i)
+        lineas.append(f"- {dias_es[dia.weekday()]} {dia.strftime('%d/%m/%Y')}")
+    return "\n".join(lineas)
 
 # ── Claude ────────────────────────────────────────────────────────────────────
 
@@ -744,10 +764,16 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
         ahora_ar = datetime.now(AR_TZ)
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-        fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
+        fecha_fin = (ahora_ar + timedelta(days=6)).strftime("%d/%m/%Y")
         rows = get_fechas()
         fechas_str = _format_fechas_para_prompt(rows)
-        prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
+        calendario_semana = _calendario_dias(ahora_ar, 7)
+        prompt = PROMPT_SEMANA.format(
+            fechas_db=fechas_str,
+            fecha_hoy=fecha_hoy,
+            fecha_fin=fecha_fin,
+            calendario_semana=calendario_semana,
+        )
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=800,
@@ -766,7 +792,12 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
         rows = get_fechas()
         fechas_str = _format_fechas_para_prompt(rows)
-        prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
+        calendario_mes = _calendario_dias(ahora_ar, 30)
+        prompt = PROMPT_MES.format(
+            fechas_db=fechas_str,
+            fecha_hoy=fecha_hoy,
+            calendario_mes=calendario_mes,
+        )
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=800,
@@ -828,10 +859,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
             ahora_ar = datetime.now(AR_TZ)
             fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-            fecha_fin = (ahora_ar + timedelta(days=7)).strftime("%d/%m/%Y")
+            fecha_fin = (ahora_ar + timedelta(days=6)).strftime("%d/%m/%Y")
             rows = get_fechas()
             fechas_str = _format_fechas_para_prompt(rows)
-            prompt = PROMPT_SEMANA.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy, fecha_fin=fecha_fin)
+            calendario_semana = _calendario_dias(ahora_ar, 7)
+            prompt = PROMPT_SEMANA.format(
+                fechas_db=fechas_str,
+                fecha_hoy=fecha_hoy,
+                fecha_fin=fecha_fin,
+                calendario_semana=calendario_semana,
+            )
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=800,
@@ -850,7 +887,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
             rows = get_fechas()
             fechas_str = _format_fechas_para_prompt(rows)
-            prompt = PROMPT_MES.format(fechas_db=fechas_str, fecha_hoy=fecha_hoy)
+            calendario_mes = _calendario_dias(ahora_ar, 30)
+            prompt = PROMPT_MES.format(
+                fechas_db=fechas_str,
+                fecha_hoy=fecha_hoy,
+                calendario_mes=calendario_mes,
+            )
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=800,
@@ -1093,7 +1135,7 @@ async def job_noche(app):
         logger.error(f"Error en cron job: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar el plan automático: {e}")
 
-# ── Main ──────────────────────────────────────────────────────
+# ── Main ────────────────────────────
 
 def main():
     init_db()
