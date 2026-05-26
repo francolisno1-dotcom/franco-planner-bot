@@ -449,6 +449,15 @@ def generar_plan_texto():
     )
 
     plan = message.content[0].text
+
+    # El modelo a veces recalcula el día de la semana incorrectamente para fechas futuras.
+    # Forzamos la primera línea con los valores calculados por Python (siempre correctos).
+    lineas_plan = plan.split("\n")
+    primera_linea_correcta = f"📅 PLAN {dia_manana_upper} {fecha_manana} — FRANCO"
+    if lineas_plan and lineas_plan[0].strip().startswith("📅"):
+        lineas_plan[0] = primera_linea_correcta
+        plan = "\n".join(lineas_plan)
+
     save_plan(fecha_manana, plan)
     return plan, fecha_manana
 
