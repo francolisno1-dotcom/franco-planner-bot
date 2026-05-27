@@ -239,7 +239,7 @@ Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño 15min
 Martes: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
 Miércoles: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
 Jueves: Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
-Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Cena 21:00 → Estudio 20:30-22:30 → Dormir 22:30
+Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Estudio 20:30-21:00 → Cena 21:00-22:00 → Estudio 22:00-22:30 → Dormir 22:30
 Sábado: Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30
 Domingo: Gym 11:00-12:30 → tarde libre → Dormir 22:30"""
 
@@ -259,7 +259,7 @@ RUTINA SEMANAL:
 - Martes: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
 - Miércoles: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
 - Jueves: Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30
-- Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Cena 21:00 → Estudio 20:30-22:30 → Dormir 22:30
+- Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Estudio 20:30-21:00 → Cena 21:00-22:00 → Estudio 22:00-22:30 → Dormir 22:30
 - Sábado: Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30
 - Domingo: Gym 11:00-12:30 → tarde libre → Dormir 22:30
 
@@ -296,6 +296,30 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - Priorizá por orgencia (deadline más cercano primero).
 - Si el día siguiente no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
 - Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
+
+REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
+
+REGLA DE DISTRIBUCIÓN DEL TIEMPO DE ESTUDIO:
+Si hay más de una tarea asignada al bloque de estudio, dividí el tiempo disponible equitativamente entre ellas y especificá el horario exacto de cada una.
+
+Ejemplo para un bloque de 30 minutos con 2 tareas:
+⭐ 22:00-22:15 Estudio
+→ MUN: Redactar posición de Liberia sobre financiamiento de misiones de paz
+
+⭐ 22:15-22:30 Estudio
+→ OMA: Resolver ejercicio 3 del examen 2024
+
+Ejemplo para un bloque de 2 horas (viernes) con 3 tareas:
+⭐ 20:30-21:00 Estudio
+→ MUN: Preparar discurso de apertura
+
+⭐ 22:00-22:20 Estudio
+→ OMA: Resolver ejercicio del examen 2023
+
+⭐ 22:20-22:30 Estudio
+→ Debate WSDC: Leer moción y armar argumentos
+
+Nunca agrupes dos tareas distintas en el mismo bloque sin dividir el tiempo.
 """
 
 PROMPT_SEMANA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
@@ -305,7 +329,7 @@ RUTINA SEMANAL:
 - Martes: estudio disponible 22:00-22:30
 - Miércoles: estudio disponible 22:00-22:30
 - Jueves: estudio disponible 22:00-22:30
-- Viernes: estudio disponible 20:30-22:30
+- Viernes: estudio disponible 20:30-21:00 y 22:00-22:30 (cena 21:00-22:00 en el medio)
 - Sábado: tarde libre
 - Domingo: tarde libre
 
@@ -331,6 +355,8 @@ IMPORTANTE:
 - Distribuí por orgencia, deadline más cercano primero
 - Respetá los slots de estudio según el día
 
+REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
+
 FORMATO — sin markdown, sin símbolos extra:
 
 📅 SEMANA DEL {fecha_hoy} AL {fecha_fin}
@@ -349,7 +375,7 @@ RUTINA SEMANAL:
 - Martes: estudio disponible 22:00-22:30
 - Miércoles: estudio disponible 22:00-22:30
 - Jueves: estudio disponible 22:00-22:30
-- Viernes: estudio disponible 20:30-22:30
+- Viernes: estudio disponible 20:30-21:00 y 22:00-22:30 (cena 21:00-22:00 en el medio)
 - Sábado: tarde libre
 - Domingo: tarde libre
 
@@ -374,6 +400,8 @@ IMPORTANTE:
 - Una línea por tarea, sin explicaciones ni justificaciones
 - Distribuí por orgencia, deadline más cercano primero
 - Respetá los slots de estudio según el día
+
+REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
 
 FORMATO — sin markdown, sin símbolos extra:
 
@@ -645,7 +673,7 @@ _RF_RUTINA_BASE = {
     "Martes":    "Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
     "Miércoles": "Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
     "Jueves":    "Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
-    "Viernes":   "Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Cena 21:00 → Estudio 20:30-22:30 → Dormir 22:30",
+    "Viernes":   "Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Estudio 20:30-21:00 → Cena 21:00-22:00 → Estudio 22:00-22:30 → Dormir 22:30",
     "Sábado":    "Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30",
     "Domingo":   "Gym 11:00-12:30 → tarde libre → Dormir 22:30",
 }
