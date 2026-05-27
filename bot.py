@@ -639,6 +639,17 @@ _RF_DIA_MAP = {
     "rf_ver_Domingo":   "Domingo",
 }
 
+# Rutina base hardcodeada por día (para mostrar en "Editar rutina fija")
+_RF_RUTINA_BASE = {
+    "Lunes":     "Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
+    "Martes":    "Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
+    "Miércoles": "Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
+    "Jueves":    "Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30",
+    "Viernes":   "Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Cena 21:00 → Estudio 20:30-22:30 → Dormir 22:30",
+    "Sábado":    "Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30",
+    "Domingo":   "Gym 11:00-12:30 → tarde libre → Dormir 22:30",
+}
+
 def _texto_rutina_fija(rows):
     if rows:
         lineas = []
@@ -1001,14 +1012,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         dia_nombre = _RF_DIA_MAP[data]
         all_rows = get_rutinas_permanentes()
         rows_dia = [r for r in all_rows if r[1] == dia_nombre or r[1] == "multiple"]
+
+        # Siempre mostrar la rutina base del día
+        rutina_base = _RF_RUTINA_BASE.get(dia_nombre, "—")
+        texto = f"📅 {dia_nombre.upper()}\n\nRUTINA BASE:\n{rutina_base}\n\nMODIFICACIONES FIJAS:\n"
         if rows_dia:
-            lineas = []
+            lineas_mod = []
             for _, r_dia, r_desc in rows_dia:
                 tag = " (todos los días)" if r_dia == "multiple" else ""
-                lineas.append(f"• {r_desc}{tag}")
-            texto = f"📅 {dia_nombre.upper()}\n\n" + "\n".join(lineas)
+                lineas_mod.append(f"• {r_desc}{tag}")
+            texto += "\n".join(lineas_mod)
         else:
-            texto = f"📅 {dia_nombre.upper()}\n\nNo hay eventos fijos para este día."
+            texto += "(ninguna todavía)"
+        texto += "\n\n¿Qué querés cambiar?"
+
         del_buttons = []
         for r_id, r_dia, r_desc in rows_dia:
             del_buttons.append([
@@ -1016,7 +1033,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         keyboard = InlineKeyboardMarkup(
             del_buttons + [
-                [InlineKeyboardButton(f"➕ Agregar para {dia_nombre}", callback_data=f"rf_add|{dia_nombre}")],
+                [InlineKeyboardButton(f"➕ Agregar modificación fija", callback_data=f"rf_add|{dia_nombre}")],
                 [InlineKeyboardButton("← Volver", callback_data="rutina_fija")],
             ]
         )
