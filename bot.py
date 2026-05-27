@@ -81,7 +81,9 @@ def get_fechas():
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute(
-        "SELECT id, fecha, evento, horario, material FROM fechas ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+        "SELECT id, fecha, evento, horario, material FROM fechas "
+        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now') "
+        "ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
     )
     rows = c.fetchall()
     conn.close()
@@ -1169,6 +1171,17 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Cron job ──────────────────────────────────────────────────────
 
+def limpiar_fechas_pasadas():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("""
+        DELETE FROM fechas
+        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) < date('now')
+    """)
+    conn.commit()
+    conn.close()
+    logger.info("Limpieza de fechas pasadas completada.")
+
 async def job_noche(app):
     logger.info("Ejecutando cron job nocturno...")
     try:
@@ -1210,6 +1223,7 @@ def main():
     # Scheduler — 22:00 hora Argentina
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
     scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
+    scheduler.add_job(limpiar_fechas_pasadas, trigger="cron", hour=0, minute=0)
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
 
