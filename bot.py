@@ -74,6 +74,15 @@ def init_db():
             descripcion TEXT NOT NULL
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS comidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia TEXT NOT NULL,
+            momento TEXT NOT NULL,
+            descripcion TEXT NOT NULL,
+            hora_recordatorio TEXT NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -230,6 +239,81 @@ def delete_rutina_permanente_by_id(row_id: int):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute("DELETE FROM rutina_permanente WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+
+# ── Dieta / Comidas ───────────────────────────────────────────────────────────
+
+COMIDAS_BASE = [
+    # Lunes
+    ("lunes", "desayuno", "3 huevos revueltos + 2 tostadas integrales + banana + vaso de leche", "07:30"),
+    ("lunes", "almuerzo", "Milanesa con puré o arroz + fruta", "11:50"),
+    ("lunes", "merienda", "2 tostadas con manteca de maní + jugo natural", "17:00"),
+    ("lunes", "cena", "Pollo a la plancha + arroz + ensalada", "21:00"),
+    # Martes
+    ("martes", "desayuno", "Avena con leche + 2 huevos + fruta", "07:30"),
+    ("martes", "almuerzo", "Pasta con salsa bolognesa + ensalada", "11:50"),
+    ("martes", "merienda", "Yogur griego + banana", "17:00"),
+    ("martes", "cena", "Carne picada magra + lentejas o papa + verdura", "21:00"),
+    # Miércoles
+    ("miércoles", "desayuno", "3 huevos revueltos + 2 tostadas integrales + vaso de leche", "07:30"),
+    ("miércoles", "almuerzo", "Pollo con arroz o fideos + fruta", "11:50"),
+    ("miércoles", "merienda", "2 tostadas con queso + jugo natural", "17:00"),
+    ("miércoles", "cena", "Pescado al horno + puré de papa + ensalada", "21:00"),
+    # Jueves
+    ("jueves", "desayuno", "Avena con leche + banana + 2 huevos", "07:30"),
+    ("jueves", "almuerzo", "Milanesa con ensalada + fruta", "11:50"),
+    ("jueves", "merienda", "Banana + puñado de nueces", "17:00"),
+    ("jueves", "cena", "Pollo o carne + arroz + verdura salteada", "21:00"),
+    # Viernes
+    ("viernes", "desayuno", "3 huevos + tostadas integrales + leche", "07:30"),
+    ("viernes", "almuerzo", "Priorizar proteína — lo que haya en el colegio", "11:50"),
+    ("viernes", "merienda", "Yogur + fruta", "17:00"),
+    ("viernes", "cena", "Pasta con atún o pollo + ensalada", "21:00"),
+    # Sábado
+    ("sábado", "desayuno", "Avena con leche + 3 huevos + fruta", "09:00"),
+    ("sábado", "merienda", "Banana + tostadas con manteca de maní (pre-partido)", "11:00"),
+    ("sábado", "almuerzo", "Carne + arroz o papa + ensalada generosa", "14:30"),
+    ("sábado", "cena", "Lo que haga la familia", "21:00"),
+    # Domingo
+    ("domingo", "desayuno", "Huevos + tostadas + leche + fruta", "09:00"),
+    ("domingo", "merienda", "Banana (pre-gym)", "10:30"),
+    ("domingo", "almuerzo", "Asado — priorizar vacío, cuadril o pollo. Agregar ensalada.", "13:00"),
+    ("domingo", "cena", "Liviano — huevos, yogur, fruta", "21:00"),
+]
+
+def seed_comidas():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM comidas")
+    count = c.fetchone()[0]
+    if count == 0:
+        c.executemany(
+            "INSERT INTO comidas (dia, momento, descripcion, hora_recordatorio) VALUES (?, ?, ?, ?)",
+            COMIDAS_BASE,
+        )
+        conn.commit()
+        logger.info("Rutina de comidas base cargada en la DB.")
+    conn.close()
+
+def get_comidas_dia(dia: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, momento, descripcion, hora_recordatorio FROM comidas WHERE dia = ? ORDER BY hora_recordatorio",
+        (dia,),
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def update_comida(dia: str, momento: str, descripcion: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "UPDATE comidas SET descripcion = ? WHERE dia = ? AND momento = ?",
+        (descripcion, dia, momento),
+    )
     conn.commit()
     conn.close()
 
@@ -599,6 +683,10 @@ def _build_main_keyboard():
             InlineKeyboardButton("📚 Proyectos", callback_data="proyectos"),
         ],
         [
+            InlineKeyboardButton("⚡ ¿Qué hago ahora?", callback_data="ahora"),
+            InlineKeyboardButton("🥗 Mi dieta", callback_data="dieta"),
+        ],
+        [
             InlineKeyboardButton("⚙️ Editar rutina fija", callback_data="rutina_fija"),
         ],
     ])
@@ -688,6 +776,25 @@ def _texto_rutina_fija(rows):
             lineas.append(f"• [{dia_label}] {desc}")
         return "⚙️ RUTINA FIJA\n\n" + "\n".join(lineas)
     return "⚙️ RUTINA FIJA\n\nNo hay eventos fijos cargados."
+
+_MOMENTO_EMOJI = {
+    "desayuno": "🌅",
+    "almuerzo": "☀️",
+    "merienda": "🌤️",
+    "cena": "🌙",
+}
+
+def _texto_dieta_hoy(dia: str, rows) -> str:
+    dias_upper = {
+        "lunes": "LUNES", "martes": "MARTES", "miércoles": "MIÉRCOLES",
+        "jueves": "JUEVES", "viernes": "VIERNES", "sábado": "SÁBADO", "domingo": "DOMINGO",
+    }
+    titulo = dias_upper.get(dia, dia.upper())
+    texto = f"🥗 DIETA DE HOY — {titulo}\n"
+    for _, momento, descripcion, hora in rows:
+        emoji = _MOMENTO_EMOJI.get(momento, "🍽️")
+        texto += f"\n{emoji} {momento.capitalize()} ({hora})\n→ {descripcion}\n"
+    return texto
 
 # ── Comandos Telegram ─────────────────────────────────────────────────────────
 
@@ -1029,6 +1136,55 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         delete_rutina_modificada(fecha)
         await query.edit_message_text(f"🗑️ Cambio de rutina para {fecha} eliminado.")
 
+    elif data == "ahora":
+        await query.edit_message_text("⏳ Pensando...")
+        try:
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+            ahora_ar = datetime.now(AR_TZ)
+            hora_actual = ahora_ar.strftime("%H:%M")
+            dias_es = {
+                0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
+                4: "viernes", 5: "sábado", 6: "domingo",
+            }
+            dia_semana = dias_es[ahora_ar.weekday()]
+            rows = get_fechas()
+            fechas_str = _format_fechas_para_prompt(rows)
+            prompt = (
+                "Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.\n\n"
+                "RUTINA SEMANAL:\n"
+                "- Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30\n"
+                "- Martes: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30\n"
+                "- Miércoles: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30\n"
+                "- Jueves: Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño 15min → Cena 21:00 → Estudio 22:00-22:30 → Dormir 22:30\n"
+                "- Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño 15min → Cena 21:00 → Estudio 20:30-22:30 → Dormir 22:30\n"
+                "- Sábado: Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30\n"
+                "- Domingo: Gym 11:00-12:30 → tarde libre → Dormir 22:30\n\n"
+                "PROYECTOS ACTIVOS:\n"
+                "- OMA — deadline 2 julio\n"
+                "- MUN ANU-AR — 26, 27 y 28 de junio\n"
+                "- Debate WSDC — práctica continua\n"
+                "- NASA ISSDC DESLA — preparación continua\n"
+                "- Materias IGCSE — siempre al día\n"
+                "- Marketing/Instagram — sin deadline\n\n"
+                f"FECHAS PRÓXIMAS:\n{fechas_str}\n\n"
+                f"Ahora son las {hora_actual} del {dia_semana}.\n\n"
+                "Respondé en 3 líneas máximo qué debería estar haciendo Franco en este momento o qué debería hacer a continuación. "
+                "Sé muy específico y directo. Sin introducción, sin explicaciones largas.\n\n"
+                "FORMATO:\n"
+                f"🕐 Son las {hora_actual}\n"
+                "→ [qué hacer ahora mismo]\n"
+                "→ [qué viene después]"
+            )
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            await query.message.reply_text(message.content[0].text)
+        except Exception as e:
+            logger.error(f"Error en ¿Qué hago ahora?: {e}")
+            await query.message.reply_text(f"❌ Error: {e}")
+
     # ── Rutina fija ───────────────────────────────────────────────────────────
 
     elif data == "rutina_fija":
@@ -1093,6 +1249,52 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             _texto_rutina_fija(rows),
             reply_markup=_build_rutina_fija_keyboard(rows),
+        )
+
+    # ── Dieta ─────────────────────────────────────────────────────────────────
+
+    elif data == "dieta":
+        ahora_ar = datetime.now(AR_TZ)
+        dias_es = {
+            0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
+            4: "viernes", 5: "sábado", 6: "domingo",
+        }
+        dia_hoy = dias_es[ahora_ar.weekday()]
+        rows = get_comidas_dia(dia_hoy)
+        if not rows:
+            await query.edit_message_text("❌ No hay comidas cargadas para hoy.")
+            return
+        texto = _texto_dieta_hoy(dia_hoy, rows)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ Editar comida", callback_data="editar_comida")],
+        ])
+        await query.edit_message_text(texto, reply_markup=keyboard)
+
+    elif data == "editar_comida":
+        ahora_ar = datetime.now(AR_TZ)
+        dias_es = {
+            0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
+            4: "viernes", 5: "sábado", 6: "domingo",
+        }
+        dia_hoy = dias_es[ahora_ar.weekday()]
+        context.user_data["editar_dia"] = dia_hoy
+        rows = get_comidas_dia(dia_hoy)
+        buttons = [
+            [InlineKeyboardButton(f"{r[1].capitalize()} ({r[3]})", callback_data=f"ec_momento|{r[1]}")]
+            for r in rows
+        ]
+        await query.edit_message_text(
+            f"¿Qué comida querés editar del {dia_hoy}?",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+
+    elif data.startswith("ec_momento|"):
+        momento = data.split("|", 1)[1]
+        dia = context.user_data.get("editar_dia", "")
+        context.user_data["editar_momento"] = momento
+        context.user_data["estado"] = "esperando_desc_comida"
+        await query.edit_message_text(
+            f"Mandame la nueva descripción para {momento} del {dia}:"
         )
 
 # ── Message Handler ──────────────────────────────────────────────────────
@@ -1162,6 +1364,15 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Evento fijo guardado para {dia_label}:\n{texto}"
         )
 
+    elif estado == 'esperando_desc_comida':
+        dia = context.user_data.get('editar_dia', '')
+        momento = context.user_data.get('editar_momento', '')
+        update_comida(dia, momento, texto)
+        context.user_data.clear()
+        await update.message.reply_text(
+            f"✅ {momento.capitalize()} del {dia} actualizado:\n→ {texto}"
+        )
+
     elif texto.lower() in ['hola', 'menu', 'menú']:
         context.user_data.clear()
         await update.message.reply_text(
@@ -1193,10 +1404,66 @@ async def job_noche(app):
         logger.error(f"Error en cron job: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar el plan automático: {e}")
 
+async def recordatorio_uniforme(app):
+    ahora = datetime.now(AR_TZ)
+    dia = ahora.weekday()
+    uniformes = {
+        0: "👔 Hoy es FORMAL",
+        1: "👟 Hoy es ED. FÍSICA",
+        2: "👔 Hoy es FORMAL",
+        3: "👔 Hoy es FORMAL",
+        4: "👟 Hoy es ED. FÍSICA",
+    }
+    if dia in uniformes:
+        mensaje = f"🌅 Buenos días Franco!\n\n{uniformes[dia]}"
+        await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
+        logger.info(f"Recordatorio uniforme enviado: {uniformes[dia]}")
+
+async def _send_meal_reminder(app, momento: str, descripcion: str):
+    mensaje = f"🍽️ En un rato toca {momento}:\n→ {descripcion}"
+    await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
+    logger.info(f"Recordatorio de comida enviado: {momento}")
+
+def _schedule_meal_reminders(scheduler, app):
+    """Programa recordatorios 90 min antes de cada comida (almuerzo lun-vie siempre a las 11:50)."""
+    dia_to_cron = {
+        "lunes": "mon", "martes": "tue", "miércoles": "wed",
+        "jueves": "thu", "viernes": "fri", "sábado": "sat", "domingo": "sun",
+    }
+    dias_semana = {"lunes", "martes", "miércoles", "jueves", "viernes"}
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT dia, momento, descripcion, hora_recordatorio FROM comidas")
+    rows = c.fetchall()
+    conn.close()
+    for dia, momento, descripcion, hora_comida in rows:
+        h, m = map(int, hora_comida.split(":"))
+        # Almuerzo lun-vie: recordatorio en el momento exacto de la comida
+        if momento == "almuerzo" and dia in dias_semana:
+            reminder_h, reminder_m = h, m
+        else:
+            total = h * 60 + m - 90
+            if total < 0:
+                continue
+            reminder_h, reminder_m = divmod(total, 60)
+        cron_dia = dia_to_cron.get(dia)
+        if not cron_dia:
+            continue
+        scheduler.add_job(
+            _send_meal_reminder,
+            trigger="cron",
+            day_of_week=cron_dia,
+            hour=reminder_h,
+            minute=reminder_m,
+            args=[app, momento, descripcion],
+        )
+    logger.info(f"Recordatorios de comidas programados para {len(rows)} entradas.")
+
 # ── Main ────────────────────────────
 
 def main():
     init_db()
+    seed_comidas()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -1224,6 +1491,8 @@ def main():
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
     scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
     scheduler.add_job(limpiar_fechas_pasadas, trigger="cron", hour=0, minute=0)
+    scheduler.add_job(recordatorio_uniforme, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=7, minute=25, args=[app])
+    _schedule_meal_reminders(scheduler, app)
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
 
@@ -1232,3 +1501,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
