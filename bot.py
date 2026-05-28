@@ -82,7 +82,7 @@ def get_fechas():
     c = conn.cursor()
     c.execute(
         "SELECT id, fecha, evento, horario, material FROM fechas "
-        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now') "
+        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now', 'localtime') "
         "ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
     )
     rows = c.fetchall()
