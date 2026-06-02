@@ -1497,8 +1497,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pending["tarea"], pending["proyecto"],
                 pending.get("deadline") or "", pending["fecha_nueva"],
             )
+            fecha_n = pending["fecha_nueva"]
+            tarea_n = pending["tarea"][:50]
             await query.edit_message_text(
-                f"✅ Reprogramado para el {pending[\'fecha_nueva\']}:\n→ {pending[\'tarea\'][:50]}"
+                f"✅ Reprogramado para el {fecha_n}:\n→ {tarea_n}"
             )
         else:
             await query.edit_message_text("✅ Reprogramado.")
