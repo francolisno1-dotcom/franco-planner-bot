@@ -1861,6 +1861,68 @@ def _schedule_meal_reminders(scheduler, app):
         )
     logger.info(f"Recordatorios de comidas programados para {len(rows)} entradas.")
 
+async def resumen_semanal(app):
+    """Genera y envía el resumen de la semana — corre los domingos a las 21:00."""
+    ahora_ar = datetime.now(AR_TZ)
+    hace_7_dias = (ahora_ar - timedelta(days=7)).strftime("%Y-%m-%d")
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("""
+        SELECT fecha, momento, cumplido FROM checkins_comidas
+        WHERE cumplido != 'sin_respuesta'
+        AND date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date(?)
+    """, (hace_7_dias,))
+    comidas = c.fetchall()
+    c.execute("""
+        SELECT fecha, tarea, proyecto, cumplido FROM checkins_tareas
+        WHERE cumplido != 'sin_respuesta'
+        AND date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date(?)
+    """, (hace_7_dias,))
+    tareas = c.fetchall()
+    c.execute("""
+        SELECT fecha_original, fecha_nueva, tarea FROM tareas_reprogramadas
+        WHERE date(substr(fecha_original,7,4)||'-'||substr(fecha_original,4,2)||'-'||substr(fecha_original,1,2)) >= date(?)
+    """, (hace_7_dias,))
+    reprogramadas = c.fetchall()
+    conn.close()
+    if not comidas and not tareas:
+        await app.bot.send_message(
+            chat_id=CHAT_ID,
+            text="📊 Primera semana completa. ¡Seguí así para ver tu progreso!",
+        )
+        return
+    tareas_si  = [(f, t) for f, t, p, cu in tareas if cu == "si"]
+    tareas_no  = [(f, t) for f, t, p, cu in tareas if cu in ("no", "parcial")]
+    comidas_si = [(f, m) for f, m, cu in comidas if cu == "si"]
+    comidas_no = [(f, m) for f, m, cu in comidas if cu in ("no", "parcial")]
+    lines = ["📊 RESUMEN DE LA SEMANA\n"]
+    if tareas_si or comidas_si:
+        lines.append("✅ CUMPLISTE:")
+        for f, t in tareas_si:
+            lines.append(f"→ {t[:45]} — {f}")
+        for f, m in comidas_si[:5]:
+            lines.append(f"→ {m.capitalize()} — {f}")
+        lines.append("")
+    if tareas_no or comidas_no:
+        lines.append("❌ NO CUMPLISTE:")
+        for f, t in tareas_no:
+            lines.append(f"→ {t[:45]} — {f}")
+        for f, m in comidas_no[:5]:
+            lines.append(f"→ {m.capitalize()} — {f}")
+        lines.append("")
+    if reprogramadas:
+        lines.append("🔄 REPROGRAMADO:")
+        for fo, fn, t in reprogramadas:
+            lines.append(f"→ {t[:45]} — movida al {fn}")
+        lines.append("")
+    total_t = len(tareas_si) + len(tareas_no)
+    total_c = len(comidas_si) + len(comidas_no)
+    tasa_t = f"{int(len(tareas_si) / total_t * 100)}%" if total_t > 0 else "—"
+    tasa_c = f"{int(len(comidas_si) / total_c * 100)}%" if total_c > 0 else "—"
+    lines.append(f"📈 Tasa de cumplimiento: {tasa_t} tareas / {tasa_c} dieta")
+    await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
+    logger.info("Resumen semanal enviado.")
+
 # ── Main ────────────────────────────
 
 def main():
@@ -1901,6 +1963,7 @@ def main():
     scheduler.add_job(_send_checkin_comida, trigger="cron", hour=22, minute=0, args=[app, "cena"])
     scheduler.add_job(marcar_checkins_comidas_sin_respuesta, trigger="cron", hour=23, minute=55)
     scheduler.add_job(marcar_checkins_tareas_sin_respuesta, trigger="cron", hour=10, minute=0)
+    scheduler.add_job(resumen_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
     _schedule_meal_reminders(scheduler, app)
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
