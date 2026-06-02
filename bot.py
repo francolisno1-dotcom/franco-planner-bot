@@ -385,6 +385,74 @@ def marcar_checkins_comidas_sin_respuesta():
     conn.close()
     logger.info("Check-ins de comidas sin respuesta marcados.")
 
+# ── Check-ins de tareas ──────────────────────────────────────────────────────
+
+def get_tareas_pendientes_ayer():
+    """Retorna (rows, fecha_ayer) de tareas pendientes del día anterior."""
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    ahora_ar = datetime.now(AR_TZ)
+    ayer = (ahora_ar - timedelta(days=1)).strftime("%d/%m/%Y")
+    c.execute(
+        "SELECT id, tarea, proyecto FROM checkins_tareas WHERE fecha = ? AND cumplido IS NULL",
+        (ayer,),
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows, ayer
+
+def save_checkin_tarea_cumplido(row_id: int, cumplido: str, nota: str = None):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "UPDATE checkins_tareas SET cumplido = ?, nota = ? WHERE id = ?",
+        (cumplido, nota, row_id),
+    )
+    conn.commit()
+    conn.close()
+
+def save_tareas_del_plan(fecha: str, plan_texto: str):
+    """Extrae las tareas del plan y las guarda en checkins_tareas."""
+    proyectos_map = {
+        "oma": "OMA", "mun": "MUN", "liberia": "MUN",
+        "wsdc": "Debate WSDC", "debate": "Debate WSDC",
+        "nasa": "NASA ISSDC", "issdc": "NASA ISSDC", "desla": "NASA ISSDC",
+        "igcse": "IGCSE", "kognity": "IGCSE", "biology": "IGCSE",
+        "instagram": "Marketing", "marketing": "Marketing",
+    }
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    for line in plan_texto.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("→"):
+            tarea = stripped[1:].strip()
+            proyecto = "Estudio"
+            for kw, proj in proyectos_map.items():
+                if kw in tarea.lower():
+                    proyecto = proj
+                    break
+            c.execute(
+                "INSERT INTO checkins_tareas (fecha, tarea, proyecto, cumplido) VALUES (?, ?, ?, NULL)",
+                (fecha, tarea, proyecto),
+            )
+    conn.commit()
+    conn.close()
+
+def marcar_checkins_tareas_sin_respuesta():
+    """Marca como sin_respuesta las tareas de ayer que no fueron respondidas."""
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    ahora_ar = datetime.now(AR_TZ)
+    ayer = (ahora_ar - timedelta(days=1)).strftime("%d/%m/%Y")
+    c.execute(
+        "UPDATE checkins_tareas SET cumplido = \'sin_respuesta\' WHERE fecha = ? AND cumplido IS NULL",
+        (ayer,),
+    )
+    conn.commit()
+    conn.close()
+    logger.info("Check-ins de tareas sin respuesta marcados.")
+
+
  ──────────────────────────────────────────────────────
 
 RUTINA_TEXTO = """🗓 RUTINA SEMANAL
@@ -1365,6 +1433,62 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Mandame la nueva descripción para {momento} del {dia}:"
         )
 
+    # ── Check-ins de tareas ─────────────────────────────────────────────────
+
+    elif data.startswith("cit_todo|"):
+        fecha_ayer = data.split("|", 1)[1]
+        conn = sqlite3.connect("planner.db")
+        c = conn.cursor()
+        c.execute("UPDATE checkins_tareas SET cumplido = \'si\' WHERE fecha = ? AND cumplido IS NULL", (fecha_ayer,))
+        conn.commit()
+        conn.close()
+        await query.edit_message_text("✅ Perfecto, todas las tareas marcadas como cumplidas.")
+
+    elif data.startswith("cit_nada|"):
+        fecha_ayer = data.split("|", 1)[1]
+        conn = sqlite3.connect("planner.db")
+        c = conn.cursor()
+        c.execute("UPDATE checkins_tareas SET cumplido = \'no\' WHERE fecha = ? AND cumplido IS NULL", (fecha_ayer,))
+        conn.commit()
+        conn.close()
+        await query.edit_message_text("❌ Anotado. Las tareas pendientes se van a reprogramar.")
+
+    elif data.startswith("cit_parcial|"):
+        fecha_ayer = data.split("|", 1)[1]
+        conn = sqlite3.connect("planner.db")
+        c = conn.cursor()
+        c.execute("SELECT id, tarea FROM checkins_tareas WHERE fecha = ? AND cumplido IS NULL", (fecha_ayer,))
+        tareas = c.fetchall()
+        conn.close()
+        if not tareas:
+            await query.edit_message_text("✅ No quedan tareas pendientes.")
+        else:
+            await query.edit_message_text("⚡ Parcial. Revisemos tarea por tarea:")
+            for row_id, tarea in tareas:
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Cumplí", callback_data=f"cit_si|{row_id}"),
+                    InlineKeyboardButton("❌ No cumplí", callback_data=f"cit_no|{row_id}"),
+                    InlineKeyboardButton("📍 Llegué hasta...", callback_data=f"cit_hasta|{row_id}"),
+                ]])
+                await context.bot.send_message(chat_id=query.message.chat_id, text=f"→ {tarea}", reply_markup=kb)
+
+    elif data.startswith("cit_si|"):
+        row_id = int(data.split("|", 1)[1])
+        save_checkin_tarea_cumplido(row_id, "si")
+        await query.edit_message_text("✅ Tarea cumplida.")
+
+    elif data.startswith("cit_no|"):
+        row_id = int(data.split("|", 1)[1])
+        save_checkin_tarea_cumplido(row_id, "no")
+        await query.edit_message_text("❌ Tarea no cumplida. Se va a reprogramar.")
+
+    elif data.startswith("cit_hasta|"):
+        row_id = int(data.split("|", 1)[1])
+        context.user_data["ci_tarea_row_id"] = row_id
+        context.user_data["estado"] = "esperando_nota_tarea"
+        await query.edit_message_text("📍 ¿Hasta dónde llegaste?")
+
+
     # ── Check-ins de comidas ────────────────────────────────────────────────
 
     elif data.startswith("cic_si|"):
@@ -1470,6 +1594,13 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         await update.message.reply_text(f"✅ Anotado para {momento}: {texto}")
 
+    elif estado == 'esperando_nota_tarea':
+        row_id = context.user_data.get('ci_tarea_row_id')
+        if row_id:
+            save_checkin_tarea_cumplido(int(row_id), "parcial", texto)
+        context.user_data.clear()
+        await update.message.reply_text(f"📍 Anotado: {texto}")
+
     elif texto.lower() in ['hola', 'menu', 'menú']:
         context.user_data.clear()
         await update.message.reply_text(
@@ -1494,6 +1625,7 @@ async def job_noche(app):
     logger.info("Ejecutando cron job nocturno...")
     try:
         plan, fecha = generar_plan_texto()
+        save_tareas_del_plan(fecha, plan)
         mensaje = f"🌙 Plan para mañana ({fecha}):\n\n{plan}"
         await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
         logger.info("Plan enviado exitosamente.")
@@ -1511,10 +1643,30 @@ async def recordatorio_uniforme(app):
         3: "👔 Hoy es FORMAL",
         4: "👟 Hoy es ED. FÍSICA",
     }
-    if dia in uniformes:
-        mensaje = f"🌅 Buenos días Franco!\n\n{uniformes[dia]}"
-        await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
-        logger.info(f"Recordatorio uniforme enviado: {uniformes[dia]}")
+    if dia not in uniformes:
+        return
+    uniform_texto = uniformes[dia]
+    tareas_ayer, fecha_ayer = get_tareas_pendientes_ayer()
+    if tareas_ayer:
+        lineas = "\n".join(f"→ {r[1]} — {r[2]}" for r in tareas_ayer)
+        texto = (
+            f"🌅 Buenos días Franco!\n\n"
+            f"{uniform_texto}\n\n"
+            f"📚 Ayer tenías pendiente:\n{lineas}\n\n"
+            f"¿Cumpliste?"
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Todo", callback_data=f"cit_todo|{fecha_ayer}"),
+            InlineKeyboardButton("❌ Nada", callback_data=f"cit_nada|{fecha_ayer}"),
+            InlineKeyboardButton("⚡ Parcial", callback_data=f"cit_parcial|{fecha_ayer}"),
+        ]])
+        await app.bot.send_message(chat_id=CHAT_ID, text=texto, reply_markup=keyboard)
+    else:
+        await app.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"🌅 Buenos días Franco!\n\n{uniform_texto}",
+        )
+    logger.info(f"Recordatorio uniforme enviado: {uniform_texto}")
 
 async def _send_checkin_comida(app, momento: str):
     """Envía check-in de comida con botones Sí/No/Parcial."""
@@ -1628,6 +1780,7 @@ def main():
     scheduler.add_job(_send_checkin_comida, trigger="cron", hour=18, minute=30, args=[app, "merienda"])
     scheduler.add_job(_send_checkin_comida, trigger="cron", hour=22, minute=0, args=[app, "cena"])
     scheduler.add_job(marcar_checkins_comidas_sin_respuesta, trigger="cron", hour=23, minute=55)
+    scheduler.add_job(marcar_checkins_tareas_sin_respuesta, trigger="cron", hour=10, minute=0)
     _schedule_meal_reminders(scheduler, app)
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
