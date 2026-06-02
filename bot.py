@@ -83,6 +83,37 @@ def init_db():
             hora_recordatorio TEXT NOT NULL
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS checkins_comidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            momento TEXT,
+            descripcion TEXT,
+            cumplido TEXT,
+            nota TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS checkins_tareas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            tarea TEXT,
+            proyecto TEXT,
+            cumplido TEXT,
+            nota TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tareas_reprogramadas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_original TEXT,
+            fecha_nueva TEXT,
+            tarea TEXT,
+            proyecto TEXT,
+            deadline TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
