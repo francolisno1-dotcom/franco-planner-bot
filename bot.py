@@ -1923,6 +1923,55 @@ async def resumen_semanal(app):
     await app.bot.send_message(chat_id=CHAT_ID, text="\n".join(lines))
     logger.info("Resumen semanal enviado.")
 
+async def recordatorio_mochila(app):
+    """Recordatorio de mochila a las 16:35 lun-vie — qué meter para estudiar esta noche."""
+    ahora_ar = datetime.now(AR_TZ)
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("""
+        SELECT fecha, evento, horario, material
+        FROM fechas
+        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now', 'localtime')
+        ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)
+        LIMIT 10
+    """)
+    fechas = c.fetchall()
+    conn.close()
+    fechas_texto = "\n".join([
+        f"{f[0]} - {f[1]}"
+        + (f" - Horario: {f[2]}" if f[2] else "")
+        + (f" - Material: {f[3]}" if f[3] else "")
+        for f in fechas
+    ]) if fechas else "Sin fechas cargadas"
+    dia = ahora_ar.weekday()  # 4 = viernes
+    tiempo_estudio = "2 horas (20:30-22:30)" if dia == 4 else "30 minutos (22:00-22:30)"
+    prompt = (
+        "Sos el planificador personal de Franco, 15 años, que está por salir del colegio.\n\n"
+        f"FECHAS PRÓXIMAS:\n{fechas_texto}\n\n"
+        f"Son las 16:35. Franco está por irse a casa. Esta noche tiene {tiempo_estudio} de estudio.\n\n"
+        "Decile exactamente qué tiene que meter en la mochila para estudiar esta noche, basándote en las fechas más urgentes. "
+        "Mencioná el material específico y para cuándo vence.\n\n"
+        "FORMATO — sin markdown, máximo 5 líneas:\n\n"
+        "🎒 Metete en la mochila:\n"
+        "→ [material específico] — para [evento] ([fecha])\n"
+        "→ [material específico] — para [evento] ([fecha])\n\n"
+        "Si no hay nada urgente para estudiar esta noche respondé exactamente:\n"
+        "🎒 Esta noche no hay nada urgente. Descansá tranquilo."
+    )
+    try:
+        claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+        response = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        mensaje = response.content[0].text
+        await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
+        logger.info("Recordatorio de mochila enviado.")
+    except Exception as e:
+        logger.error(f"Error en recordatorio_mochila: {e}")
+        await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error en recordatorio de mochila: {e}")
+
 # ── Main ────────────────────────────
 
 def main():
@@ -1964,6 +2013,7 @@ def main():
     scheduler.add_job(marcar_checkins_comidas_sin_respuesta, trigger="cron", hour=23, minute=55)
     scheduler.add_job(marcar_checkins_tareas_sin_respuesta, trigger="cron", hour=10, minute=0)
     scheduler.add_job(resumen_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
+    scheduler.add_job(recordatorio_mochila, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=16, minute=35, args=[app])
     _schedule_meal_reminders(scheduler, app)
     scheduler.start()
     logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
