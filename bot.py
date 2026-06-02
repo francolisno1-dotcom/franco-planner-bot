@@ -452,6 +452,61 @@ def marcar_checkins_tareas_sin_respuesta():
     conn.close()
     logger.info("Check-ins de tareas sin respuesta marcados.")
 
+# ── Reprogramación de tareas ─────────────────────────────────────────────────
+
+def _get_deadline_proyecto(proyecto: str):
+    """Busca en fechas si hay un evento relacionado con el proyecto."""
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT fecha, evento FROM fechas ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)")
+    rows = c.fetchall()
+    conn.close()
+    p_lower = proyecto.lower()
+    kws = [p_lower] + p_lower.split()
+    for fecha, evento in rows:
+        if any(kw in evento.lower() for kw in kws if len(kw) > 2):
+            return fecha
+    return None
+
+def reprogramar_tarea(tarea: str, proyecto: str, deadline: str = None):
+    """
+    Encuentra el próximo día hábil para la tarea.
+    Returns (fecha_nueva, hay_tiempo):
+      hay_tiempo=True  → dentro del deadline (o sin deadline)
+      hay_tiempo=False → fuera del deadline, día más cercano igual
+    """
+    ahora_ar = datetime.now(AR_TZ)
+    candidato = ahora_ar + timedelta(days=1)
+    fecha_limite = None
+    if deadline:
+        try:
+            d, m, y = deadline.split("/")
+            deadline_dt = datetime(int(y), int(m), int(d), tzinfo=AR_TZ)
+            fecha_limite = deadline_dt - timedelta(days=2)
+        except Exception:
+            pass
+    for _ in range(14):
+        if candidato.weekday() < 5:
+            if fecha_limite and candidato.date() > fecha_limite.date():
+                return candidato.strftime("%d/%m/%Y"), False
+            return candidato.strftime("%d/%m/%Y"), True
+        candidato += timedelta(days=1)
+    return (ahora_ar + timedelta(days=1)).strftime("%d/%m/%Y"), False
+
+def _guardar_tarea_reprogramada(tarea: str, proyecto: str, deadline: str, fecha_nueva: str):
+    """Guarda la reprogramación en la DB."""
+    ahora_ar = datetime.now(AR_TZ)
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO tareas_reprogramadas (fecha_original, fecha_nueva, tarea, proyecto, deadline) VALUES (?, ?, ?, ?, ?)",
+        (ahora_ar.strftime("%d/%m/%Y"), fecha_nueva, tarea, proyecto, deadline or ""),
+    )
+    conn.commit()
+    conn.close()
+    logger.info(f"Tarea reprogramada: {tarea[:40]} → {fecha_nueva}")
+
+
 
  ──────────────────────────────────────────────────────
 
@@ -1433,6 +1488,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Mandame la nueva descripción para {momento} del {dia}:"
         )
 
+    # ── Reprogramación ──────────────────────────────────────────────────────
+
+    elif data == "reprogram_si":
+        pending = context.user_data.pop("reprogram_pending", None)
+        if pending:
+            _guardar_tarea_reprogramada(
+                pending["tarea"], pending["proyecto"],
+                pending.get("deadline") or "", pending["fecha_nueva"],
+            )
+            await query.edit_message_text(
+                f"✅ Reprogramado para el {pending[\'fecha_nueva\']}:\n→ {pending[\'tarea\'][:50]}"
+            )
+        else:
+            await query.edit_message_text("✅ Reprogramado.")
+
+    elif data == "reprogram_no":
+        context.user_data.pop("reprogram_pending", None)
+        await query.edit_message_text("❌ No reprogramado. La tarea queda cancelada.")
+
+
     # ── Check-ins de tareas ─────────────────────────────────────────────────
 
     elif data.startswith("cit_todo|"):
@@ -1448,10 +1523,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fecha_ayer = data.split("|", 1)[1]
         conn = sqlite3.connect("planner.db")
         c = conn.cursor()
+        c.execute("SELECT id, tarea, proyecto FROM checkins_tareas WHERE fecha = ? AND cumplido IS NULL", (fecha_ayer,))
+        tareas_no = c.fetchall()
         c.execute("UPDATE checkins_tareas SET cumplido = \'no\' WHERE fecha = ? AND cumplido IS NULL", (fecha_ayer,))
         conn.commit()
         conn.close()
-        await query.edit_message_text("❌ Anotado. Las tareas pendientes se van a reprogramar.")
+        reprogramadas = []
+        for row_id, tarea, proyecto in tareas_no:
+            deadline = _get_deadline_proyecto(proyecto)
+            fecha_nueva, hay_tiempo = reprogramar_tarea(tarea, proyecto, deadline)
+            if hay_tiempo:
+                _guardar_tarea_reprogramada(tarea, proyecto, deadline or "", fecha_nueva)
+                reprogramadas.append(f"→ {tarea[:40]} → {fecha_nueva}")
+        if reprogramadas:
+            await query.edit_message_text(
+                "❌ Ninguna cumplida.\n\n🔄 Reprogramadas:\n" + "\n".join(reprogramadas)
+            )
+        else:
+            await query.edit_message_text("❌ Ninguna cumplida. Se reprogramarán cuando haya tiempo disponible.")
 
     elif data.startswith("cit_parcial|"):
         fecha_ayer = data.split("|", 1)[1]
@@ -1480,7 +1569,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cit_no|"):
         row_id = int(data.split("|", 1)[1])
         save_checkin_tarea_cumplido(row_id, "no")
-        await query.edit_message_text("❌ Tarea no cumplida. Se va a reprogramar.")
+        conn = sqlite3.connect("planner.db")
+        c = conn.cursor()
+        c.execute("SELECT tarea, proyecto FROM checkins_tareas WHERE id = ?", (row_id,))
+        row_tarea = c.fetchone()
+        conn.close()
+        if row_tarea:
+            tarea, proyecto = row_tarea
+            deadline = _get_deadline_proyecto(proyecto)
+            fecha_nueva, hay_tiempo = reprogramar_tarea(tarea, proyecto, deadline)
+            if hay_tiempo:
+                _guardar_tarea_reprogramada(tarea, proyecto, deadline or "", fecha_nueva)
+                dl_txt = f"\n→ Deadline: {deadline}" if deadline else ""
+                await query.edit_message_text(
+                    f"🔄 Reprogramado:\n→ {tarea[:50]}\n→ movida al {fecha_nueva}{dl_txt}"
+                )
+            else:
+                context.user_data["reprogram_pending"] = {
+                    "tarea": tarea, "proyecto": proyecto,
+                    "deadline": deadline, "fecha_nueva": fecha_nueva,
+                }
+                dl_txt = f"del {deadline}" if deadline else "disponible"
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Sí", callback_data="reprogram_si"),
+                    InlineKeyboardButton("❌ No", callback_data="reprogram_no"),
+                ]])
+                await query.edit_message_text(
+                    f"⚠️ No hay tiempo disponible antes del deadline {dl_txt}.\n"
+                    f"¿Igualmente reprogramar para el {fecha_nueva}?\n→ {tarea[:40]}",
+                    reply_markup=kb,
+                )
+        else:
+            await query.edit_message_text("❌ Tarea no cumplida.")
 
     elif data.startswith("cit_hasta|"):
         row_id = int(data.split("|", 1)[1])
