@@ -508,7 +508,6 @@ def _guardar_tarea_reprogramada(tarea: str, proyecto: str, deadline: str, fecha_
 
 
 
- ──────────────────────────────────────────────────────
 
 RUTINA_TEXTO = """🗓 RUTINA SEMANAL
 
