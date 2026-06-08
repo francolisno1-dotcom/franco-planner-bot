@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import logging
 from datetime import datetime, timedelta
@@ -111,6 +112,15 @@ def init_db():
             tarea TEXT,
             proyecto TEXT,
             deadline TEXT
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS plan_semanal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            semana_inicio TEXT,
+            generado_en TEXT,
+            plan_json TEXT
         )
     """)
 
@@ -275,6 +285,404 @@ def delete_rutina_permanente_by_id(row_id: int):
 
 # ── Dieta / Comidas ───────────────────────────────────────────────────────────
 
+
+def get_plan_semanal(semana_inicio: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT plan_json, generado_en FROM plan_semanal WHERE semana_inicio = ? ORDER BY id DESC LIMIT 1", (semana_inicio,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def save_plan_semanal(semana_inicio: str, plan_json_str: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    generado_en = datetime.now(AR_TZ).strftime("%d/%m/%Y %H:%M")
+    c.execute("INSERT INTO plan_semanal (semana_inicio, generado_en, plan_json) VALUES (?, ?, ?)",
+              (semana_inicio, generado_en, plan_json_str))
+    conn.commit()
+    conn.close()
+
+def _lunes_semana_actual() -> str:
+    ahora = datetime.now(AR_TZ)
+    lunes = ahora - timedelta(days=ahora.weekday())
+    return lunes.strftime("%Y-%m-%d")
+
+def _lunes_semana_proxima() -> str:
+    ahora = datetime.now(AR_TZ)
+    weekday = ahora.weekday()
+    if weekday == 6:
+        days = 1
+    else:
+        days = 7 - weekday
+    return (ahora + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+COMIDAS_BASE = [
+    # LUNES (día de fútbol)
+    ("lunes", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + vaso de leche o yogur natural", "07:45"),
+    ("lunes", "media_mañana", "Fruta (banana o manzana) + puñado de maní sin sal 🥜", "10:30"),
+    ("lunes", "almuerzo", "Pollo o carne a la plancha + arroz o papas + ensalada. Evitar frituras.", "13:00"),
+    ("lunes", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní o queso + fruta 🍌 (comer 1h antes del entreno)", "17:15"),
+    ("lunes", "cena", "Milanesa al horno o pollo + puré o arroz + ensalada", "21:00"),
+    # MARTES (día de gym)
+    ("martes", "desayuno", "Avena cocida con leche + banana + 2 huevos duros 🥚", "07:45"),
+    ("martes", "media_mañana", "Yogur natural + granola o cereales sin azúcar", "10:30"),
+    ("martes", "almuerzo", "Pasta con salsa de tomate y carne picada o atún. O arroz con pollo.", "13:00"),
+    ("martes", "merienda", "Pre-gym: 2 tostadas con queso fresco o mantequilla de maní + fruta 🍌", "17:15"),
+    ("martes", "cena", "Post-gym 💪: Pollo a la plancha o pescado + lentejas o porotos + ensalada", "21:00"),
+    # MIÉRCOLES (día de gym)
+    ("miércoles", "desayuno", "3 huevos revueltos + 2 tostadas pan integral + jugo de naranja natural 🍊", "07:45"),
+    ("miércoles", "media_mañana", "Fruta + puñado de nueces o almendras", "10:30"),
+    ("miércoles", "almuerzo", "Carne o pollo + carbohidrato (arroz, pasta, papa) + verdura", "13:00"),
+    ("miércoles", "merienda", "Pre-gym: 2 tostadas con queso + banana 🍌", "17:15"),
+    ("miércoles", "cena", "Bifes o pescado a la plancha + arroz integral + ensalada verde 🥗", "21:00"),
+    # JUEVES (día de fútbol)
+    ("jueves", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + vaso de leche o yogur natural", "07:45"),
+    ("jueves", "media_mañana", "Banana + maní sin sal", "10:30"),
+    ("jueves", "almuerzo", "Énfasis en carbohidratos: pasta, arroz o papa + proteína magra", "13:00"),
+    ("jueves", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní o queso + fruta 🍌 (comer 1h antes del entreno)", "17:15"),
+    ("jueves", "cena", "Pollo o carne + pasta o arroz + ensalada", "21:00"),
+    # VIERNES (día de tenis)
+    ("viernes", "desayuno", "Avena con leche y fruta 🥣", "07:45"),
+    ("viernes", "media_mañana", "Yogur + fruta", "10:30"),
+    ("viernes", "almuerzo", "Variedad proteica (atún, pollo, huevo) + carbohidrato + ensalada", "13:00"),
+    ("viernes", "merienda", "Pre-tenis: liviana — fruta + 1 tostada 🎾", "17:00"),
+    ("viernes", "cena", "Libre — cena familiar, comer bien pero sin excederse 🍽️", "21:00"),
+    # SÁBADO (partido de fútbol 12:00)
+    ("sábado", "desayuno", "Avena + leche + banana + 2 huevos ⚽ (comida importante pre-partido)", "09:00"),
+    ("sábado", "media_mañana", "Fruta o tostada ligera (antes del partido)", "10:30"),
+    ("sábado", "almuerzo", "Post-partido: pollo/carne + arroz/papa — recuperación 💪", "14:30"),
+    ("sábado", "merienda", "Yogur o fruta", "17:00"),
+    ("sábado", "cena", "Lo que haga la familia, priorizando proteína y verdura", "21:00"),
+    # DOMINGO (gym 11:00)
+    ("domingo", "desayuno", "Avena + leche + banana + 2 huevos 🏋️ (pre-gym)", "09:30"),
+    ("domingo", "almuerzo", "Post-gym: proteína + carbohidrato + verdura", "13:00"),
+    ("domingo", "merienda", "Merienda liviana — yogur o fruta", "17:00"),
+    ("domingo", "cena", "Cena familiar nutritiva 🍽️", "21:00"),
+]
+
+
+rt os
+import json
+import sqlite3
+import logging
+from datetime import datetime, timedelta
+import pytz
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ContextTypes,
+)
+
+import anthropic
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# ── Config ────────────────────────────────────────────────────────────────────
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+CHAT_ID = int(os.environ["CHAT_ID"])
+
+AR_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+# ── Database ─────────────────────────────────────────────────────────────────
+
+def init_db():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS fechas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL,
+            evento TEXT NOT NULL,
+            horario TEXT,
+            material TEXT
+        )
+    """)
+    # Migración: agregar columna horario si no existe (para DBs existentes)
+    try:
+        c.execute("ALTER TABLE fechas ADD COLUMN horario TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # La columna ya existe
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS feriados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS planes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE,
+            contenido TEXT NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rutina_modificada (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL UNIQUE,
+            descripcion TEXT NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rutina_permanente (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia TEXT NOT NULL,
+            descripcion TEXT NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS comidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dia TEXT NOT NULL,
+            momento TEXT NOT NULL,
+            descripcion TEXT NOT NULL,
+            hora_recordatorio TEXT NOT NULL
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS checkins_comidas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            momento TEXT,
+            descripcion TEXT,
+            cumplido TEXT,
+            nota TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS checkins_tareas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT,
+            tarea TEXT,
+            proyecto TEXT,
+            cumplido TEXT,
+            nota TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tareas_reprogramadas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_original TEXT,
+            fecha_nueva TEXT,
+            tarea TEXT,
+            proyecto TEXT,
+            deadline TEXT
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS plan_semanal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            semana_inicio TEXT,
+            generado_en TEXT,
+            plan_json TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+def get_fechas():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, fecha, evento, horario, material FROM fechas "
+        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now', 'localtime') "
+        "ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def save_fecha(fecha: str, evento: str, horario: str, material: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO fechas (fecha, evento, horario, material) VALUES (?, ?, ?, ?)",
+        (fecha, evento, horario or None, material or None)
+    )
+    conn.commit()
+    conn.close()
+
+def delete_fecha_by_index(index: int) -> bool:
+    rows = get_fechas()
+    if index < 1 or index > len(rows):
+        return False
+    row_id = rows[index - 1][0]
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM fechas WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def _format_fechas_para_prompt(rows) -> str:
+    """Formatea las fechas para incluir en el prompt de Claude."""
+    if not rows:
+        return "No hay fechas cargadas."
+    lines = []
+    for r in rows:
+        # r = (id, fecha, evento, horario, material)
+        linea = f"- {r[1]}: {r[2]}"
+        if r[3]:  # horario
+            linea += f" - Horario: {r[3]}"
+        if r[4]:  # material
+            linea += f" - Material: {r[4]}"
+        lines.append(linea)
+    return "\n".join(lines)
+
+def save_feriado(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO feriados (fecha) VALUES (?)", (fecha,))
+    conn.commit()
+    conn.close()
+
+def get_feriados():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT id, fecha FROM feriados ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_feriado_by_index(index: int) -> bool:
+    rows = get_feriados()
+    if index < 1 or index > len(rows):
+        return False
+    row_id = rows[index - 1][0]
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM feriados WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def is_feriado(fecha: str) -> bool:
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM feriados WHERE fecha = ?", (fecha,))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+def save_plan(fecha: str, contenido: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO planes (fecha, contenido) VALUES (?, ?)", (fecha, contenido))
+    conn.commit()
+    conn.close()
+
+def get_plan(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT contenido FROM planes WHERE fecha = ?", (fecha,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def save_rutina_modificada(fecha: str, descripcion: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO rutina_modificada (fecha, descripcion) VALUES (?, ?)",
+        (fecha, descripcion),
+    )
+    conn.commit()
+    conn.close()
+
+def get_rutina_modificada(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT descripcion FROM rutina_modificada WHERE fecha = ?", (fecha,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+def get_all_rutinas_modificadas():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT fecha, descripcion FROM rutina_modificada ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+    )
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_rutina_modificada(fecha: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM rutina_modificada WHERE fecha = ?", (fecha,))
+    conn.commit()
+    conn.close()
+
+def save_rutina_permanente(dia: str, descripcion: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO rutina_permanente (dia, descripcion) VALUES (?, ?)", (dia, descripcion))
+    conn.commit()
+    conn.close()
+
+def get_rutinas_permanentes():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT id, dia, descripcion FROM rutina_permanente ORDER BY id")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_rutina_permanente_by_id(row_id: int):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM rutina_permanente WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+
+# ── Dieta / Comidas ───────────────────────────────────────────────────────────
+
+
+def get_plan_semanal(semana_inicio: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT plan_json, generado_en FROM plan_semanal WHERE semana_inicio = ? ORDER BY id DESC LIMIT 1", (semana_inicio,))
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def save_plan_semanal(semana_inicio: str, plan_json_str: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    generado_en = datetime.now(AR_TZ).strftime("%d/%m/%Y %H:%M")
+    c.execute("INSERT INTO plan_semanal (semana_inicio, generado_en, plan_json) VALUES (?, ?, ?)",
+              (semana_inicio, generado_en, plan_json_str))
+    conn.commit()
+    conn.close()
+
+def _lunes_semana_actual() -> str:
+    ahora = datetime.now(AR_TZ)
+    lunes = ahora - timedelta(days=ahora.weekday())
+    return lunes.strftime("%Y-%m-%d")
+
+def _lunes_semana_proxima() -> str:
+    ahora = datetime.now(AR_TZ)
+    weekday = ahora.weekday()
+    if weekday == 6:
+        days = 1
+    else:
+        days = 7 - weekday
+    return (ahora + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
 COMIDAS_BASE = [
     # Lunes
     ("lunes", "desayuno", "3 huevos revueltos + 2 tostadas integrales + banana + vaso de leche", "07:30"),
@@ -316,15 +724,16 @@ COMIDAS_BASE = [
 def seed_comidas():
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM comidas")
-    count = c.fetchone()[0]
-    if count == 0:
+    c.execute("SELECT COUNT(*) FROM comidas WHERE momento = 'media_mañana'")
+    media_count = c.fetchone()[0]
+    if media_count == 0:
+        c.execute("DELETE FROM comidas")
         c.executemany(
             "INSERT INTO comidas (dia, momento, descripcion, hora_recordatorio) VALUES (?, ?, ?, ?)",
             COMIDAS_BASE,
         )
         conn.commit()
-        logger.info("Rutina de comidas base cargada en la DB.")
+        logger.info("Dieta actualizada a v2 con media mañana.")
     conn.close()
 
 def get_comidas_dia(dia: str):
@@ -526,7 +935,8 @@ MUN (ANU-AR) — 26, 27 y 28 de junio. Representa Liberia en AG3. Preparar: tóp
 Debate WSDC (ADA) — Sin fecha fija, práctica continua. Formato WSDC, mociones variadas.
 NASA ISSDC — DESLA — Competencia anual, preparación continua.
 Materias IGCSE — Siempre al día. Material en Kognity.
-Marketing/Instagram — Real Estate, sin deadline."""
+Marketing/Instagram — Real Estate, sin deadline.
+{contexto_plan_semanal}"""
 
 PROMPT_DIA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
 
@@ -690,6 +1100,41 @@ FORMATO — sin markdown, sin símbolos extra:
 (Solo incluir días que tengan algo asignado)
 """
 
+PROMPT_PLAN_SEMANAL = """Sos el planificador semanal de Franco, 15 años, Hudson, Buenos Aires.
+
+RUTINA FIJA:
+- Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño → Cena 21:00 → Estudio 22:00-22:30
+- Martes: Colegio 8:30-17:00 → Gym 18:30-20:00 → Casa 20:15 → Baño → Cena 21:00 → Estudio 22:00-22:30
+- Miércoles: igual que Martes
+- Jueves: Colegio 8:30-17:00 → Fútbol 18:30-19:30 → Casa 19:45 → Baño → Cena 21:00 → Estudio 22:00-22:30
+- Viernes: Colegio 8:30-17:00 → Tenis 18:00-19:00 → Casa 19:15 → Baño → Cena 21:00 → Estudio 20:30-22:30
+- Sábado: Partido fútbol 12:00-14:30 → tarde libre
+- Domingo: Gym 11:00-12:30 → tarde libre
+
+PROYECTOS ACTIVOS:
+- OMA — deadline 2 julio
+- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3
+- Debate WSDC (ADA) — práctica continua
+- NASA ISSDC DESLA — preparación continua
+- Materias IGCSE — siempre al día
+- Marketing/Instagram — Real Estate, sin deadline
+- Coding/desarrollo personal — sin deadline fijo
+
+FECHAS PRÓXIMAS ESTA SEMANA:
+{fechas_db}
+
+MODIFICACIONES PERMANENTES:
+{rutina_permanente}
+
+Generá un plan de estudio y preparación para cada día de la semana que empieza el {fecha_lunes}.
+Para cada día indicá:
+- Bloque de estudio principal (tema + proyecto)
+- Tarea secundaria si hay tiempo (puede ser coding, Instagram, o proyecto menor)
+- Prioridad del día (qué es lo más urgente)
+
+Respondé ÚNICAMENTE en JSON con este formato exacto, sin texto adicional:
+{{"lunes": {{"prioridad": "...", "estudio_principal": "...", "secundario": "...", "nota": "..."}}, "martes": {{}}, "miércoles": {{}}, "jueves": {{}}, "viernes": {{}}, "sábado": {{}}, "domingo": {{}}}}"""
+
 # ── Helpers de calendario ─────────────────────────────────────────────────────
 
 def _calendario_dias(fecha_inicio: datetime, n_dias: int) -> str:
@@ -754,6 +1199,28 @@ def generar_plan_texto():
     else:
         contexto_rutina_fija = ""
 
+    # Contexto del plan semanal para mañana
+    semana_inicio = _lunes_semana_actual()
+    plan_semanal_row = get_plan_semanal(semana_inicio)
+    contexto_plan_semanal = ""
+    if plan_semanal_row:
+        try:
+            plan_json = json.loads(plan_semanal_row[0])
+            dias_map = {0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
+                        4: "viernes", 5: "sábado", 6: "domingo"}
+            dia_key = dias_map.get(manana_ar.weekday(), "")
+            if dia_key in plan_json:
+                dp = plan_json[dia_key]
+                contexto_plan_semanal = (
+                    f"\nPLAN SEMANAL PARA MAÑANA:\n"
+                    f"- Prioridad: {dp.get('prioridad', '')}\n"
+                    f"- Estudio principal: {dp.get('estudio_principal', '')}\n"
+                    f"- Secundario: {dp.get('secundario', '')}\n"
+                    f"- Nota: {dp.get('nota', '')}\n"
+                )
+        except Exception:
+            pass
+
     prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
         dia_semana=dia_semana,
@@ -764,6 +1231,7 @@ def generar_plan_texto():
         contexto_feriado=contexto_feriado,
         contexto_rutina=contexto_rutina,
         contexto_rutina_fija=contexto_rutina_fija,
+        contexto_plan_semanal=contexto_plan_semanal,
     )
 
     message = client.messages.create(
@@ -784,6 +1252,55 @@ def generar_plan_texto():
 
     save_plan(fecha_manana, plan)
     return plan, fecha_manana
+
+
+async def generar_plan_semanal(app):
+    """Genera y guarda el plan semanal. Se ejecuta automáticamente los domingos a las 21:00."""
+    logger.info("Generando plan semanal...")
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=180.0)
+        semana_inicio = _lunes_semana_proxima()
+        fecha_lunes_dt = datetime.strptime(semana_inicio, "%Y-%m-%d")
+        fecha_lunes_str = fecha_lunes_dt.strftime("%d/%m/%Y")
+
+        rows = get_fechas()
+        fechas_semana = [
+            f"{f} — {e}" + (f" ({h})" if h else "") + (f" | Material: {m}" if m else "")
+            for f, e, h, m in rows
+        ]
+        fechas_str = "\n".join(fechas_semana) if fechas_semana else "Sin fechas próximas."
+
+        rows_perm = get_rutinas_permanentes()
+        rutina_perm_str = "\n".join(f"- {d}" for _, _, d in rows_perm) if rows_perm else "Sin modificaciones permanentes."
+
+        prompt = PROMPT_PLAN_SEMANAL.format(
+            fechas_db=fechas_str,
+            rutina_permanente=rutina_perm_str,
+            fecha_lunes=fecha_lunes_str,
+        )
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        plan_text = message.content[0].text.strip()
+        json_start = plan_text.find('{')
+        json_end = plan_text.rfind('}') + 1
+        if json_start != -1 and json_end > json_start:
+            plan_json_str = plan_text[json_start:json_end]
+            json.loads(plan_json_str)  # validate
+            save_plan_semanal(semana_inicio, plan_json_str)
+            logger.info(f"Plan semanal guardado para semana {semana_inicio}.")
+            await app.bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"📆 Plan semanal generado para la semana del {fecha_lunes_str}.\nTocá 'Esta semana' para verlo."
+            )
+        else:
+            raise ValueError("No se encontró JSON válido en la respuesta.")
+    except Exception as e:
+        logger.error(f"Error generando plan semanal: {e}")
+        await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar plan semanal: {e}")
+
 
 async def _enviar_plan_multipartes(reply_obj, texto: str):
     """Envía el texto en partes si supera 4096 chars. reply_obj es update.message o query.message."""
@@ -969,6 +1486,7 @@ def _texto_rutina_fija(rows):
 
 _MOMENTO_EMOJI = {
     "desayuno": "🌅",
+    "media_mañana": "🍎",
     "almuerzo": "☀️",
     "merienda": "🌤️",
     "cena": "🌙",
@@ -985,6 +1503,41 @@ def _texto_dieta_hoy(dia: str, rows) -> str:
         emoji = _MOMENTO_EMOJI.get(momento, "🍽️")
         texto += f"\n{emoji} {momento.capitalize()} ({hora})\n→ {descripcion}\n"
     return texto
+
+
+def _texto_dieta_semana() -> str:
+    dias_orden = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dias_labels = {
+        "lunes": "LUNES ⚽ (fútbol)",
+        "martes": "MARTES 🏋️ (gym)",
+        "miércoles": "MIÉRCOLES 🏋️ (gym)",
+        "jueves": "JUEVES ⚽ (fútbol)",
+        "viernes": "VIERNES 🎾 (tenis)",
+        "sábado": "SÁBADO ⚽ (partido)",
+        "domingo": "DOMINGO 🏋️ (gym)",
+    }
+    texto = "🥗 DIETA SEMANAL — FRANCO\n"
+    texto += "🎯 Meta: ~2800-3000 kcal | 115-128g proteína | 320-384g carbos\n"
+    texto += "💧 Mínimo 2.5L agua/día\n\n"
+
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    for dia in dias_orden:
+        c.execute("SELECT momento, descripcion, hora_recordatorio FROM comidas WHERE dia = ? ORDER BY hora_recordatorio", (dia,))
+        rows = c.fetchall()
+        if not rows:
+            continue
+        label = dias_labels.get(dia, dia.upper())
+        texto += f"📅 {label}\n"
+        for momento, descripcion, hora in rows:
+            emoji = _MOMENTO_EMOJI.get(momento, "🍽️")
+            texto += f"{emoji} {momento.replace('_', ' ').capitalize()} ({hora}): {descripcion}\n"
+        texto += "\n"
+    conn.close()
+    texto += "✅ Está bien: asado familiar, comida casera, flexibilidad fin de semana\n"
+    texto += "❌ Evitar: frituras, gaseosas, ultraprocesados, exceso azúcar"
+    return texto
+
 
 # ── Comandos Telegram ─────────────────────────────────────────────────────────
 
@@ -1122,6 +1675,14 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error en /semana: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
 
+
+async def cmd_plansemanal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ Generando plan semanal con Claude, esperá un momento...")
+    try:
+        await generar_plan_semanal(context.application)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
 async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Generando plan, esperá un momento...")
     try:
@@ -1192,30 +1753,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(f"❌ Error al generar el plan: {e}")
 
     elif data == "semana":
-        await query.edit_message_text("⏳ Generando plan semanal, esperá un momento...")
+        semana_inicio = _lunes_semana_actual()
+        row = get_plan_semanal(semana_inicio)
+        if not row:
+            await query.edit_message_text(
+                "📆 No hay plan semanal guardado para esta semana.\n"
+                "El plan semanal se genera automáticamente los domingos a las 21:00.\n"
+                "Podés generarlo ahora con /plansemanal"
+            )
+            return
+        plan_json_str, generado_en = row
         try:
-            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
-            ahora_ar = datetime.now(AR_TZ)
-            fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-            fecha_fin = (ahora_ar + timedelta(days=6)).strftime("%d/%m/%Y")
-            rows = get_fechas()
-            fechas_str = _format_fechas_para_prompt(rows)
-            calendario_semana = _calendario_dias(ahora_ar, 7)
-            prompt = PROMPT_SEMANA.format(
-                fechas_db=fechas_str,
-                fecha_hoy=fecha_hoy,
-                fecha_fin=fecha_fin,
-                calendario_semana=calendario_semana,
-            )
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=800,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            await _enviar_plan_multipartes(query.message, message.content[0].text)
+            plan = json.loads(plan_json_str)
+            dias_orden = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+            texto = f"📆 PLAN SEMANAL — semana del {semana_inicio}\n(Generado: {generado_en})\n\n"
+            for dia in dias_orden:
+                if dia in plan:
+                    dp = plan[dia]
+                    texto += f"📅 {dia.upper()}\n"
+                    texto += f"⭐ {dp.get('estudio_principal', '—')}\n"
+                    texto += f"🔸 Secundario: {dp.get('secundario', '—')}\n"
+                    texto += f"🔥 Prioridad: {dp.get('prioridad', '—')}\n"
+                    if dp.get('nota'):
+                        texto += f"📝 {dp.get('nota')}\n"
+                    texto += "\n"
+            await _enviar_plan_multipartes(query.message, texto)
         except Exception as e:
-            logger.error(f"Error en semana callback: {e}")
-            await query.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
+            await query.edit_message_text(f"❌ Error al mostrar plan semanal: {e}")
 
     elif data == "mes":
         await query.edit_message_text("⏳ Generando plan mensual, esperá un momento...")
@@ -1444,21 +2008,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Dieta ─────────────────────────────────────────────────────────────────
 
     elif data == "dieta":
-        ahora_ar = datetime.now(AR_TZ)
-        dias_es = {
-            0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
-            4: "viernes", 5: "sábado", 6: "domingo",
-        }
-        dia_hoy = dias_es[ahora_ar.weekday()]
-        rows = get_comidas_dia(dia_hoy)
-        if not rows:
-            await query.edit_message_text("❌ No hay comidas cargadas para hoy.")
-            return
-        texto = _texto_dieta_hoy(dia_hoy, rows)
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✏️ Editar comida", callback_data="editar_comida")],
-        ])
-        await query.edit_message_text(texto, reply_markup=keyboard)
+        texto = _texto_dieta_semana()
+        if len(texto) > 4000:
+            mid = texto[:4000].rfind('\n📅')
+            if mid == -1:
+                mid = 4000
+            await query.edit_message_text(texto[:mid])
+            await query.message.reply_text(texto[mid:])
+        else:
+            await query.edit_message_text(texto)
 
     elif data == "editar_comida":
         ahora_ar = datetime.now(AR_TZ)
@@ -1991,6 +2549,7 @@ def main():
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("semana", cmd_semana))
+    app.add_handler(CommandHandler("plansemanal", cmd_plansemanal))
     app.add_handler(CommandHandler("mes", cmd_mes))
     app.add_handler(CommandHandler("proyectos", cmd_proyectos))
     app.add_handler(CommandHandler("rutina", cmd_rutina))
@@ -2013,6 +2572,7 @@ def main():
     scheduler.add_job(_send_checkin_comida, trigger="cron", hour=22, minute=0, args=[app, "cena"])
     scheduler.add_job(marcar_checkins_comidas_sin_respuesta, trigger="cron", hour=23, minute=55)
     scheduler.add_job(marcar_checkins_tareas_sin_respuesta, trigger="cron", hour=10, minute=0)
+    scheduler.add_job(generar_plan_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
     scheduler.add_job(resumen_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
     scheduler.add_job(recordatorio_mochila, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=16, minute=35, args=[app])
     _schedule_meal_reminders(scheduler, app)
