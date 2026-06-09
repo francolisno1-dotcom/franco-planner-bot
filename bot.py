@@ -1069,13 +1069,16 @@ async def generar_plan_semanal(app):
         if json_start == -1 or json_end <= json_start:
             raise ValueError("No se encontró bloque JSON en la respuesta de Claude.")
         plan_json_str = plan_text[json_start:json_end]
-        # Limpiar caracteres problemáticos
+        # Limpiar caracteres problemáticos y trailing commas
         plan_json_str = (
             plan_json_str
             .replace('\u201c', '"').replace('\u201d', '"')
             .replace('\u2018', "'").replace('\u2019', "'")
             .replace('\u2026', '...')
         )
+        # Eliminar trailing commas antes de } o ] (error frecuente de modelos)
+        import re as _re
+        plan_json_str = _re.sub(r',\s*([\}\]])', r'\1', plan_json_str)
         # Intentar parsear; si falla, avisar con mensaje claro
         try:
             json.loads(plan_json_str)
