@@ -124,6 +124,16 @@ def init_db():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS contexto_franco (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            categoria TEXT,
+            clave TEXT,
+            valor TEXT,
+            actualizado_en TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -558,6 +568,108 @@ def _guardar_tarea_reprogramada(tarea: str, proyecto: str, deadline: str, fecha_
     logger.info(f"Tarea reprogramada: {tarea[:40]} → {fecha_nueva}")
 
 
+CONTEXTO_INICIAL = [
+    # Materias — dificultad actual (puede cambiar)
+    ("materia", "Italiano", "actualmente difícil, prioridad alta"),
+    ("materia", "Literatura (Lengua)", "actualmente difícil, prioridad alta"),
+    ("materia", "Maths", "dificultad media-alta"),
+    ("materia", "Business Studies", "dificultad media-alta"),
+    ("materia", "Introducción a la Química", "dificultad media-alta"),
+    ("materia", "Biología", "dificultad media-alta"),
+    ("materia", "Introducción a la Física", "dificultad media-alta"),
+    ("materia", "Literature (inglés)", "dificultad media-alta"),
+    ("materia", "Historia", "dificultad media"),
+    ("materia", "Geografía", "dificultad media"),
+    ("materia", "NTICX", "dificultad media"),
+    ("materia", "Portugués", "dificultad media"),
+    ("materia", "Salud y Adolescencia", "dificultad media"),
+    ("materia", "Educación Física", "fácil, poco tiempo de estudio necesario"),
+    ("materia", "Matemática Ciclo Superior", "fácil, poco tiempo de estudio necesario"),
+    # Proyectos — estado actual
+    ("proyecto", "MUN ANU-AR", "26-28 junio, ya preparado, solo repaso liviano"),
+    ("proyecto", "OMA Zonal", "2 julio, aún no empezó preparación, tiene material de exámenes anteriores, prioridad alta"),
+    ("proyecto", "Exámenes cuatrimestrales", "1-17 julio, todas las materias, dos años de material, evento más importante del año"),
+    ("proyecto", "Debate WSDC", "práctica continua sin fecha fija, prioridad media"),
+    ("proyecto", "Instagram Real Estate", "sin deadline, quiere publicaciones diarias, prioridad baja"),
+    ("proyecto", "NASA ISSDC DESLA", "inactivo por ahora, no planificar"),
+    ("proyecto", "Coding personal", "diseño de sistemas con IA, sin deadline, solo si sobra tiempo"),
+    # Contexto general
+    ("general", "colegio", "4° Año A Secundaria Sur, sistema por quincenas, ahora en quincena 7 de 9, cuatrimestre 1"),
+    ("general", "gym", "martes pecho+trícep, miércoles espalda+bícep, domingo pecho+hombro+pierna, empezó en marzo"),
+    ("general", "sueño", "se acuesta 22:30, a veces se queda leyendo hasta las 23:50"),
+    ("general", "personalidad", "le cuesta arrancar tareas, se organiza bien bajo presión, lee libros de desarrollo personal"),
+]
+
+
+def get_contexto_franco():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT categoria, clave, valor FROM contexto_franco ORDER BY categoria, clave")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def upsert_contexto(categoria: str, clave: str, valor: str):
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    ahora = datetime.now(AR_TZ).strftime("%d/%m/%Y %H:%M")
+    c.execute("SELECT id FROM contexto_franco WHERE clave = ?", (clave,))
+    row = c.fetchone()
+    if row:
+        c.execute(
+            "UPDATE contexto_franco SET categoria=?, valor=?, actualizado_en=? WHERE clave=?",
+            (categoria, valor, ahora, clave),
+        )
+    else:
+        c.execute(
+            "INSERT INTO contexto_franco (categoria, clave, valor, actualizado_en) VALUES (?, ?, ?, ?)",
+            (categoria, clave, valor, ahora),
+        )
+    conn.commit()
+    conn.close()
+
+
+def seed_contexto():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM contexto_franco")
+    count = c.fetchone()[0]
+    if count == 0:
+        ahora = datetime.now(AR_TZ).strftime("%d/%m/%Y %H:%M")
+        for cat, clave, valor in CONTEXTO_INICIAL:
+            c.execute(
+                "INSERT INTO contexto_franco (categoria, clave, valor, actualizado_en) VALUES (?, ?, ?, ?)",
+                (cat, clave, valor, ahora),
+            )
+        conn.commit()
+        logger.info("Contexto inicial de Franco cargado.")
+    conn.close()
+
+
+def _build_contexto_prompt() -> str:
+    rows = get_contexto_franco()
+    if not rows:
+        return ""
+    by_cat = {}
+    for cat, clave, valor in rows:
+        by_cat.setdefault(cat, []).append((clave, valor))
+    cat_labels = {"materia": "Materias", "proyecto": "Proyectos", "general": "General"}
+    lines = ["CONTEXTO ACTUAL DE FRANCO:"]
+    for cat in ["materia", "proyecto", "general"]:
+        if cat not in by_cat:
+            continue
+        lines.append(f"[{cat_labels[cat]}]")
+        for clave, valor in by_cat[cat]:
+            lines.append(f"- {clave}: {valor}")
+    for cat, items in by_cat.items():
+        if cat not in cat_labels:
+            lines.append(f"[{cat.capitalize()}]")
+            for clave, valor in items:
+                lines.append(f"- {clave}: {valor}")
+    return "\n".join(lines) + "\n"
+
+
 
 
 RUTINA_TEXTO = """🗓 RUTINA SEMANAL
@@ -591,13 +703,7 @@ RUTINA SEMANAL:
 - Sábado: Partido fútbol 12:00-14:30 → tarde libre → Dormir 22:30
 - Domingo: Gym 11:00-12:30 → tarde libre → Dormir 22:30
 
-PROYECTOS Y DEADLINES:
-- OMA — deadline 2 julio. Ejercicios de exámenes pasados.
-- MUN (ANU-AR) — 26, 27 y 28 de junio. Liberia en AG3. Tópicos, discursos, posición.
-- Debate WSDC (ADA) — práctica continua. Formato WSDC.
-- NASA ISSDC — DESLA — preparación continua.
-- Materias IGCSE — al día. Material en Kognity.
-- Marketing/Instagram — Real Estate, sin deadline.
+{contexto_franco}
 
 {contexto_rutina_fija}FECHAS PRÓXIMAS CARGADAS:
 {fechas_db}
@@ -661,13 +767,7 @@ RUTINA SEMANAL:
 - Sábado: tarde libre
 - Domingo: tarde libre
 
-PROYECTOS ACTIVOS:
-- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.
-- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.
-- Debate WSDC — práctica continua.
-- NASA ISSDC DESLA — preparación continua.
-- Materias IGCSE — siempre al día.
-- Marketing/Instagram — sin deadline.
+{contexto_franco}
 
 FECHAS CARGADAS:
 {fechas_db}
@@ -707,13 +807,7 @@ RUTINA SEMANAL:
 - Sábado: tarde libre
 - Domingo: tarde libre
 
-PROYECTOS ACTIVOS:
-- OMA — deadline 2 julio. Preparación: ejercicios de exámenes pasados.
-- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3.
-- Debate WSDC — práctica continua.
-- NASA ISSDC DESLA — preparación continua.
-- Materias IGCSE — siempre al día.
-- Marketing/Instagram — sin deadline.
+{contexto_franco}
 
 FECHAS CARGADAS:
 {fechas_db}
@@ -753,14 +847,7 @@ RUTINA FIJA:
 - Sábado: Partido fútbol 12:00-14:30 → tarde libre
 - Domingo: Gym 11:00-12:30 → tarde libre
 
-PROYECTOS ACTIVOS:
-- OMA — deadline 2 julio
-- MUN ANU-AR — 26, 27 y 28 de junio. Representa Liberia en AG3
-- Debate WSDC (ADA) — práctica continua
-- NASA ISSDC DESLA — preparación continua
-- Materias IGCSE — siempre al día
-- Marketing/Instagram — Real Estate, sin deadline
-- Coding/desarrollo personal — sin deadline fijo
+{contexto_franco}
 
 FECHAS PRÓXIMAS ESTA SEMANA:
 {fechas_db}
@@ -865,6 +952,7 @@ def generar_plan_texto():
 
     prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
+        contexto_franco=_build_contexto_prompt(),
         dia_semana=dia_semana,
         fecha_hoy=fecha_hoy,
         dia_manana=dia_manana,
@@ -917,6 +1005,7 @@ async def generar_plan_semanal(app):
 
         prompt = PROMPT_PLAN_SEMANAL.format(
             fechas_db=fechas_str,
+            contexto_franco=_build_contexto_prompt(),
             rutina_permanente=rutina_perm_str,
             fecha_lunes=fecha_lunes_str,
         )
@@ -1034,6 +1123,9 @@ def _build_main_keyboard():
         [
             InlineKeyboardButton("⚡ ¿Qué hago ahora?", callback_data="ahora"),
             InlineKeyboardButton("🥗 Mi dieta", callback_data="dieta"),
+        ],
+        [
+            InlineKeyboardButton("🧠 Mi contexto", callback_data="contexto"),
         ],
         [
             InlineKeyboardButton("⚙️ Editar rutina fija", callback_data="rutina_fija"),
@@ -1303,6 +1395,7 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendario_semana = _calendario_dias(ahora_ar, 7)
         prompt = PROMPT_SEMANA.format(
             fechas_db=fechas_str,
+            contexto_franco=_build_contexto_prompt(),
             fecha_hoy=fecha_hoy,
             fecha_fin=fecha_fin,
             calendario_semana=calendario_semana,
@@ -1316,6 +1409,50 @@ async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error en /semana: {e}")
         await update.message.reply_text(f"❌ Error al generar el plan semanal: {e}")
+
+
+async def cmd_contexto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Uso: /contexto [clave] [descripción libre]"""
+    args = context.args
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "Uso: /contexto [clave] [descripción]\n"
+            "Ejemplo: /contexto Italiano ahora me sale bien\n\n"
+            "Las claves de materias y proyectos se detectan automáticamente."
+        )
+        return
+    clave = args[0]
+    valor = " ".join(args[1:])
+    # Auto-detect category
+    materias = {e[1] for e in CONTEXTO_INICIAL if e[0] == "materia"}
+    proyectos = {e[1] for e in CONTEXTO_INICIAL if e[0] == "proyecto"}
+    # Also check existing DB keys
+    rows_db = get_contexto_franco()
+    cat_map = {r[1]: r[0] for r in rows_db}
+    if clave in cat_map:
+        categoria = cat_map[clave]
+    elif clave in materias:
+        categoria = "materia"
+    elif clave in proyectos:
+        categoria = "proyecto"
+    else:
+        # Try partial match (case-insensitive)
+        clave_lower = clave.lower()
+        matched_cat = None
+        for m in materias:
+            if m.lower() == clave_lower or clave_lower in m.lower():
+                clave = m
+                matched_cat = "materia"
+                break
+        if not matched_cat:
+            for p in proyectos:
+                if p.lower() == clave_lower or clave_lower in p.lower():
+                    clave = p
+                    matched_cat = "proyecto"
+                    break
+        categoria = matched_cat or "general"
+    upsert_contexto(categoria, clave, valor)
+    await update.message.reply_text(f"✅ Contexto actualizado: {clave} → {valor}")
 
 
 async def cmd_plansemanal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1336,6 +1473,7 @@ async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         calendario_mes = _calendario_dias(ahora_ar, 30)
         prompt = PROMPT_MES.format(
             fechas_db=fechas_str,
+            contexto_franco=_build_contexto_prompt(),
             fecha_hoy=fecha_hoy,
             calendario_mes=calendario_mes,
         )
@@ -1708,6 +1846,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("reprogram_pending", None)
         await query.edit_message_text("❌ No reprogramado. La tarea queda cancelada.")
 
+
+    elif data == "contexto":
+        rows = get_contexto_franco()
+        if not rows:
+            await query.edit_message_text("ℹ️ Sin contexto cargado. Usá /contexto para agregar.")
+            return
+        by_cat = {}
+        for cat, clave, valor in rows:
+            by_cat.setdefault(cat, []).append((clave, valor))
+        cat_labels = {"materia": "📚 Materias", "proyecto": "🎯 Proyectos", "general": "⚙️ General"}
+        lines = ["🧠 CONTEXTO ACTUAL\n"]
+        for cat in ["materia", "proyecto", "general"]:
+            if cat not in by_cat:
+                continue
+            lines.append(cat_labels[cat])
+            for clave, valor in by_cat[cat]:
+                lines.append(f"  • {clave}: {valor}")
+            lines.append("")
+        for cat, items in by_cat.items():
+            if cat not in cat_labels:
+                lines.append(f"  {cat.capitalize()}")
+                for clave, valor in items:
+                    lines.append(f"  • {clave}: {valor}")
+                lines.append("")
+        lines.append("Usá /contexto [clave] [descripción] para actualizar.")
+        texto = "\n".join(lines)
+        if len(texto) > 4000:
+            await query.edit_message_text(texto[:4000])
+        else:
+            await query.edit_message_text(texto)
 
     # ── Check-ins de tareas ─────────────────────────────────────────────────
 
@@ -2178,6 +2346,7 @@ async def recordatorio_mochila(app):
 def main():
     init_db()
     seed_comidas()
+    seed_contexto()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -2191,6 +2360,7 @@ def main():
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("semana", cmd_semana))
+    app.add_handler(CommandHandler("contexto", cmd_contexto))
     app.add_handler(CommandHandler("plansemanal", cmd_plansemanal))
     app.add_handler(CommandHandler("mes", cmd_mes))
     app.add_handler(CommandHandler("proyectos", cmd_proyectos))
