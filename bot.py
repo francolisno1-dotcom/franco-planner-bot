@@ -673,16 +673,25 @@ def _build_contexto_prompt() -> str:
 
 FECHAS_INICIALES = [
     # Formato: (DD/MM/YYYY, evento, horario, material)
-    ("09/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
-    ("09/06/2026", "Tarea Literatura", None, "La Casa de Bernarda Alba"),
-    ("10/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
-    ("10/06/2026", "Trabajo de inglés (Laburo Lola)", None, "Mock — evaluación tipo past paper"),
     ("11/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
-    ("13/06/2026", "XV de tichu", None, "Cumpleaños de 15, sale desde la puerta del barrio (no es académico)"),
+    ("12/06/2026", "Presentación Química", None, "Bioetanol"),
+    ("12/06/2026", "Examen Matemáticas", None, "Segunda parte Álgebra & Graphs"),
+    ("12/06/2026", "Examen Física", None, "Dinámica y Leyes de Newton"),
+    ("23/06/2026", "Entregar TP Matemática", None, "Vectors, Matrix & Transformation"),
     ("26/06/2026", "MUN ANU-AR Día 1", None, "Discurso apertura, posición Liberia AG3"),
+    ("26/06/2026", "Español IGCSE Paper 1 y 2", None, "Todo el material IGCSE — resolver conflicto con directora"),
     ("27/06/2026", "MUN ANU-AR Día 2", None, "Debate General AG3"),
     ("28/06/2026", "MUN ANU-AR Día 3", None, "Resoluciones finales AG3"),
+    ("29/06/2026", "Historia IGCSE", None, "Todo lo visto este cuatrimestre"),
+    ("01/07/2026", "English Literature IGCSE Paper 1 y 2", None, "Material IGCSE dos años"),
     ("02/07/2026", "OMA Olimpiadas Matemáticas", None, "Ejercicios exámenes pasados"),
+    ("03/07/2026", "English IGCSE Paper 1 y 2", None, "Material IGCSE dos años"),
+    ("06/07/2026", "Literatura Paper 1 IGCSE", None, "Material IGCSE dos años"),
+    ("07/07/2026", "Italiano IGCSE", None, "Material IGCSE dos años"),
+    ("08/07/2026", "Biology IGCSE Paper 1 y 2", None, "Material IGCSE dos años"),
+    ("13/07/2026", "Literatura Paper 2 IGCSE", None, "Material IGCSE dos años"),
+    ("15/07/2026", "Business Studies IGCSE Paper 1 y 2", None, "Material IGCSE dos años"),
+    ("16/07/2026", "Matemática IGCSE Paper 1 y 2", None, "Material IGCSE dos años"),
 ]
 
 
@@ -873,7 +882,9 @@ FORMATO — sin markdown, sin símbolos extra:
 (Solo incluir días que tengan algo asignado)
 """
 
-PROMPT_PLAN_SEMANAL = """Sos el planificador semanal de Franco, 15 años, Hudson, Buenos Aires.
+PROMPT_PLAN_SEMANAL = """Respondé ÚNICAMENTE con el JSON. Sin texto antes ni después. Sin comillas tipográficas. Sin markdown. Sin bloques de código.
+
+Sos el planificador semanal de Franco, 15 años, Hudson, Buenos Aires.
 
 RUTINA FIJA:
 - Lunes: Colegio 8:30-17:00 → Fútbol 18:00-19:30 → Casa 19:45 → Baño → Cena 21:00 → Estudio 22:00-22:30
@@ -1052,19 +1063,39 @@ async def generar_plan_semanal(app):
             messages=[{"role": "user", "content": prompt}],
         )
         plan_text = message.content[0].text.strip()
+        # Extraer bloque JSON (primer { al último })
         json_start = plan_text.find('{')
         json_end = plan_text.rfind('}') + 1
-        if json_start != -1 and json_end > json_start:
-            plan_json_str = plan_text[json_start:json_end]
-            json.loads(plan_json_str)  # validate
-            save_plan_semanal(semana_inicio, plan_json_str)
-            logger.info(f"Plan semanal guardado para semana {semana_inicio}.")
+        if json_start == -1 or json_end <= json_start:
+            raise ValueError("No se encontró bloque JSON en la respuesta de Claude.")
+        plan_json_str = plan_text[json_start:json_end]
+        # Limpiar caracteres problemáticos
+        plan_json_str = (
+            plan_json_str
+            .replace('\u201c', '"').replace('\u201d', '"')
+            .replace('\u2018', "'").replace('\u2019', "'")
+            .replace('\u2026', '...')
+        )
+        # Intentar parsear; si falla, avisar con mensaje claro
+        try:
+            json.loads(plan_json_str)
+        except json.JSONDecodeError as json_err:
+            logger.error(f"JSON inválido en plan semanal: {json_err}\nTexto: {plan_json_str[:400]}")
             await app.bot.send_message(
                 chat_id=CHAT_ID,
-                text=f"📆 Plan semanal generado para la semana del {fecha_lunes_str}.\nTocá 'Esta semana' para verlo."
+                text=(
+                    f"⚠️ El plan se generó pero Claude devolvió JSON con formato incorrecto.\n"
+                    f"Error: {json_err}\n\n"
+                    f"Intentá de nuevo con /plansemanal."
+                )
             )
-        else:
-            raise ValueError("No se encontró JSON válido en la respuesta.")
+            return
+        save_plan_semanal(semana_inicio, plan_json_str)
+        logger.info(f"Plan semanal guardado para semana {semana_inicio}.")
+        await app.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"📆 Plan semanal generado para la semana del {fecha_lunes_str}.\nTocá 'Esta semana' para verlo."
+        )
     except Exception as e:
         logger.error(f"Error generando plan semanal: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar plan semanal: {e}")
