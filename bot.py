@@ -1033,7 +1033,7 @@ async def generar_plan_semanal(app):
         rows = get_fechas()
         fechas_semana = [
             f"{f} — {e}" + (f" ({h})" if h else "") + (f" | Material: {m}" if m else "")
-            for f, e, h, m in rows
+            for _, f, e, h, m in rows
         ]
         fechas_str = "\n".join(fechas_semana) if fechas_semana else "Sin fechas próximas."
 
