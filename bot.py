@@ -671,6 +671,43 @@ def _build_contexto_prompt() -> str:
 
 
 
+FECHAS_INICIALES = [
+    # Formato: (DD/MM/YYYY, evento, horario, material)
+    ("09/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
+    ("09/06/2026", "Tarea Literatura", None, "La Casa de Bernarda Alba"),
+    ("10/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
+    ("10/06/2026", "Trabajo de inglés (Laburo Lola)", None, "Mock — evaluación tipo past paper"),
+    ("11/06/2026", "Oral Literatura", None, "La Casa de Bernarda Alba"),
+    ("13/06/2026", "XV de tichu", None, "Cumpleaños de 15, sale desde la puerta del barrio (no es académico)"),
+    ("26/06/2026", "MUN ANU-AR Día 1", None, "Discurso apertura, posición Liberia AG3"),
+    ("27/06/2026", "MUN ANU-AR Día 2", None, "Debate General AG3"),
+    ("28/06/2026", "MUN ANU-AR Día 3", None, "Resoluciones finales AG3"),
+    ("02/07/2026", "OMA Olimpiadas Matemáticas", None, "Ejercicios exámenes pasados"),
+]
+
+
+def seed_fechas_iniciales():
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    inserted = 0
+    for fecha, evento, horario, material in FECHAS_INICIALES:
+        c.execute(
+            "SELECT COUNT(*) FROM fechas WHERE fecha = ? AND evento = ?",
+            (fecha, evento),
+        )
+        if c.fetchone()[0] == 0:
+            c.execute(
+                "INSERT INTO fechas (fecha, evento, horario, material) VALUES (?, ?, ?, ?)",
+                (fecha, evento, horario, material),
+            )
+            inserted += 1
+    conn.commit()
+    conn.close()
+    if inserted:
+        logger.info(f"Fechas iniciales: {inserted} fechas nuevas cargadas.")
+
+
+
 
 RUTINA_TEXTO = """🗓 RUTINA SEMANAL
 
@@ -2347,6 +2384,7 @@ def main():
     init_db()
     seed_comidas()
     seed_contexto()
+    seed_fechas_iniciales()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
