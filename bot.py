@@ -2049,27 +2049,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📍 ¿Hasta dónde llegaste?")
 
 
-    # ── Check-ins de comidas ────────────────────────────────────────────────
-
-    elif data.startswith("cic_si|"):
-        _, fecha, momento = data.split("|", 2)
-        save_checkin_comida_cumplido(fecha, momento, "si")
-        await query.edit_message_text(f"✅ {momento.capitalize()} registrado. ¡Bien!")
-
-    elif data.startswith("cic_no|"):
-        _, fecha, momento = data.split("|", 2)
-        save_checkin_comida_cumplido(fecha, momento, "no")
-        await query.edit_message_text(
-            f"❌ {momento.capitalize()} no cumplido.\nAnotado. Intentá compensar en la próxima comida con más proteína."
-        )
-
-    elif data.startswith("cic_parcial|"):
-        _, fecha, momento = data.split("|", 2)
-        context.user_data["ci_fecha"] = fecha
-        context.user_data["ci_momento"] = momento
-        context.user_data["estado"] = "esperando_nota_comida"
-        await query.edit_message_text(f"⚡ {momento.capitalize()} parcial. ¿Qué comiste?")
-
 
 # ── Message Handler ──────────────────────────────────────────────────────
 
@@ -2147,12 +2126,6 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ {momento.capitalize()} del {dia} actualizado:\n→ {texto}"
         )
 
-    elif estado == 'esperando_nota_comida':
-        fecha = context.user_data.get('ci_fecha', '')
-        momento = context.user_data.get('ci_momento', '')
-        save_checkin_comida_nota(fecha, momento, texto)
-        context.user_data.clear()
-        await update.message.reply_text(f"✅ Anotado para {momento}: {texto}")
 
     elif estado == 'esperando_nota_tarea':
         row_id = context.user_data.get('ci_tarea_row_id')
@@ -2227,39 +2200,6 @@ async def recordatorio_uniforme(app):
             text=f"🌅 Buenos días Franco!\n\n{uniform_texto}",
         )
     logger.info(f"Recordatorio uniforme enviado: {uniform_texto}")
-
-async def _send_checkin_comida(app, momento: str):
-    """Envía check-in de comida con botones Sí/No/Parcial."""
-    ahora_ar = datetime.now(AR_TZ)
-    dias_es = {
-        0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
-        4: "viernes", 5: "sábado", 6: "domingo",
-    }
-    dia_hoy = dias_es[ahora_ar.weekday()]
-    fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-    rows = get_comidas_dia(dia_hoy)
-    descripcion = next((r[2] for r in rows if r[1] == momento), "—")
-    conn = sqlite3.connect("planner.db")
-    c = conn.cursor()
-    c.execute("SELECT id FROM checkins_comidas WHERE fecha = ? AND momento = ?", (fecha_hoy, momento))
-    if not c.fetchone():
-        c.execute(
-            "INSERT INTO checkins_comidas (fecha, momento, descripcion, cumplido) VALUES (?, ?, ?, NULL)",
-            (fecha_hoy, momento, descripcion),
-        )
-        conn.commit()
-    conn.close()
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Sí", callback_data=f"cic_si|{fecha_hoy}|{momento}"),
-        InlineKeyboardButton("❌ No", callback_data=f"cic_no|{fecha_hoy}|{momento}"),
-        InlineKeyboardButton("⚡ Parcial", callback_data=f"cic_parcial|{fecha_hoy}|{momento}"),
-    ]])
-    await app.bot.send_message(
-        chat_id=CHAT_ID,
-        text=f"🍽️ ¿Cumpliste con {momento}?\n→ {descripcion}",
-        reply_markup=keyboard,
-    )
-    logger.info(f"Check-in comida enviado: {momento}")
 
 async def _send_meal_reminder(app, momento: str, descripcion: str):
     mensaje = f"🍽️ En un rato toca {momento}:\n→ {descripcion}"
@@ -2449,12 +2389,7 @@ def main():
     scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
     scheduler.add_job(limpiar_fechas_pasadas, trigger="cron", hour=0, minute=0)
     scheduler.add_job(recordatorio_uniforme, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=7, minute=25, args=[app])
-    # Check-ins de comidas — después de cada comida
-    scheduler.add_job(_send_checkin_comida, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=8, minute=0, args=[app, "desayuno"])
-    scheduler.add_job(_send_checkin_comida, trigger="cron", hour=13, minute=30, args=[app, "almuerzo"])
-    scheduler.add_job(_send_checkin_comida, trigger="cron", hour=18, minute=30, args=[app, "merienda"])
-    scheduler.add_job(_send_checkin_comida, trigger="cron", hour=22, minute=0, args=[app, "cena"])
-    scheduler.add_job(marcar_checkins_comidas_sin_respuesta, trigger="cron", hour=23, minute=55)
+
     scheduler.add_job(marcar_checkins_tareas_sin_respuesta, trigger="cron", hour=10, minute=0)
     scheduler.add_job(generar_plan_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
     scheduler.add_job(resumen_semanal, trigger="cron", day_of_week="sun", hour=21, minute=0, args=[app])
