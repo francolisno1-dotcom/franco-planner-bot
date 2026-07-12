@@ -84,6 +84,13 @@ def init_db():
             hora_recordatorio TEXT NOT NULL
         )
     """)
+    # Migración: agregar columna kcal a comidas si no existe (para DBs existentes)
+    try:
+        c.execute("ALTER TABLE comidas ADD COLUMN kcal INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # La columna ya existe
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS checkins_comidas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,13 +144,19 @@ def init_db():
     conn.commit()
     conn.close()
 
+def _hoy_ar_iso() -> str:
+    """Fecha de HOY en hora Argentina, formato YYYY-MM-DD (el servidor corre en UTC)."""
+    return datetime.now(AR_TZ).strftime("%Y-%m-%d")
+
 def get_fechas():
+    """Devuelve solo fechas cuyo dia NO paso todavia (comparado en hora Argentina)."""
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute(
         "SELECT id, fecha, evento, horario, material FROM fechas "
-        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now', 'localtime') "
-        "ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)"
+        "WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date(?) "
+        "ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)",
+        (_hoy_ar_iso(),)
     )
     rows = c.fetchall()
     conn.close()
@@ -329,70 +342,85 @@ def _lunes_semana_proxima() -> str:
 
 
 COMIDAS_BASE = [
+    # Formato: (dia, momento, descripcion, hora, kcal aprox)
+    # Regla: SIEMPRE platos específicos y concretos, nunca macros genéricos.
     # LUNES (día de fútbol)
-    ("lunes", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + vaso de leche o yogur natural", "07:45"),
-    ("lunes", "media_mañana", "Fruta (banana o manzana) + puñado de maní sin sal 🥜", "10:30"),
-    ("lunes", "almuerzo", "Pollo o carne a la plancha + arroz o papas + ensalada. Evitar frituras.", "13:00"),
-    ("lunes", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní o queso + fruta 🍌 (comer 1h antes del entreno)", "17:15"),
-    ("lunes", "cena", "Milanesa al horno o pollo + puré o arroz + ensalada", "21:00"),
+    ("lunes", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + vaso de leche entera", "07:45", 480),
+    ("lunes", "media_mañana", "1 banana + puñado de maní sin sal (30g) 🥜", "10:30", 280),
+    ("lunes", "almuerzo", "Pechuga de pollo a la plancha + arroz blanco + ensalada de lechuga y tomate", "13:00", 750),
+    ("lunes", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní + 1 banana 🍌 (1h antes del entreno)", "17:15", 380),
+    ("lunes", "cena", "Milanesa de carne al horno + puré de papa + ensalada", "21:00", 900),
     # MARTES (día de gym)
-    ("martes", "desayuno", "Avena cocida con leche + banana + 2 huevos duros 🥚", "07:45"),
-    ("martes", "media_mañana", "Yogur natural + granola o cereales sin azúcar", "10:30"),
-    ("martes", "almuerzo", "Pasta con salsa de tomate y carne picada o atún. O arroz con pollo.", "13:00"),
-    ("martes", "merienda", "Pre-gym: 2 tostadas con queso fresco o mantequilla de maní + fruta 🍌", "17:15"),
-    ("martes", "cena", "Post-gym 💪: Pollo a la plancha o pescado + lentejas o porotos + ensalada", "21:00"),
+    ("martes", "desayuno", "Avena cocida con leche + 1 banana + 2 huevos duros 🥚", "07:45", 550),
+    ("martes", "media_mañana", "Yogur natural + granola sin azúcar (3 cucharadas)", "10:30", 250),
+    ("martes", "almuerzo", "Pasta con salsa de tomate y carne picada", "13:00", 800),
+    ("martes", "merienda", "Pre-gym: 2 tostadas con queso fresco + 1 banana 🍌", "17:15", 350),
+    ("martes", "cena", "Post-gym 💪: Pollo al horno + guiso de lentejas + ensalada verde", "21:00", 850),
     # MIÉRCOLES (día de gym)
-    ("miércoles", "desayuno", "3 huevos revueltos + 2 tostadas pan integral + jugo de naranja natural 🍊", "07:45"),
-    ("miércoles", "media_mañana", "Fruta + puñado de nueces o almendras", "10:30"),
-    ("miércoles", "almuerzo", "Carne o pollo + carbohidrato (arroz, pasta, papa) + verdura", "13:00"),
-    ("miércoles", "merienda", "Pre-gym: 2 tostadas con queso + banana 🍌", "17:15"),
-    ("miércoles", "cena", "Bifes o pescado a la plancha + arroz integral + ensalada verde 🥗", "21:00"),
+    ("miércoles", "desayuno", "3 huevos revueltos + 2 tostadas de pan integral + jugo de naranja exprimido 🍊", "07:45", 560),
+    ("miércoles", "media_mañana", "1 manzana + puñado de nueces (30g)", "10:30", 280),
+    ("miércoles", "almuerzo", "Bife a la plancha + papas al horno + ensalada de zanahoria y huevo", "13:00", 800),
+    ("miércoles", "merienda", "Pre-gym: 2 tostadas con queso + 1 banana 🍌", "17:15", 350),
+    ("miércoles", "cena", "Merluza a la plancha + arroz integral + ensalada verde 🥗", "21:00", 750),
     # JUEVES (día de fútbol)
-    ("jueves", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + vaso de leche o yogur natural", "07:45"),
-    ("jueves", "media_mañana", "Banana + maní sin sal", "10:30"),
-    ("jueves", "almuerzo", "Énfasis en carbohidratos: pasta, arroz o papa + proteína magra", "13:00"),
-    ("jueves", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní o queso + fruta 🍌 (comer 1h antes del entreno)", "17:15"),
-    ("jueves", "cena", "Pollo o carne + pasta o arroz + ensalada", "21:00"),
+    ("jueves", "desayuno", "2 huevos revueltos + 2 tostadas de pan integral + yogur natural", "07:45", 480),
+    ("jueves", "media_mañana", "1 banana + puñado de maní sin sal (30g)", "10:30", 280),
+    ("jueves", "almuerzo", "Ñoquis con salsa bolognesa (plato grande — énfasis en carbohidratos)", "13:00", 850),
+    ("jueves", "merienda", "Pre-fútbol: 2 tostadas con mantequilla de maní + 1 manzana 🍌 (1h antes del entreno)", "17:15", 380),
+    ("jueves", "cena", "Pollo grillé + arroz con arvejas + ensalada", "21:00", 800),
     # VIERNES (día de tenis)
-    ("viernes", "desayuno", "Avena con leche y fruta 🥣", "07:45"),
-    ("viernes", "media_mañana", "Yogur + fruta", "10:30"),
-    ("viernes", "almuerzo", "Variedad proteica (atún, pollo, huevo) + carbohidrato + ensalada", "13:00"),
-    ("viernes", "merienda", "Pre-tenis: liviana — fruta + 1 tostada 🎾", "17:00"),
-    ("viernes", "cena", "Libre — cena familiar, comer bien pero sin excederse 🍽️", "21:00"),
+    ("viernes", "desayuno", "Avena cocida con leche + 1 manzana rallada + 1 cucharada de miel 🥣", "07:45", 500),
+    ("viernes", "media_mañana", "Yogur natural + 1 banana", "10:30", 250),
+    ("viernes", "almuerzo", "Tarta de atún y huevo (2 porciones) + ensalada mixta", "13:00", 750),
+    ("viernes", "merienda", "Pre-tenis liviana: 1 banana + 1 tostada con queso 🎾", "17:00", 250),
+    ("viernes", "cena", "Cena familiar: bife con puré o pastas caseras (porción normal, sin excederse) 🍽️", "21:00", 900),
     # SÁBADO (partido de fútbol 12:00)
-    ("sábado", "desayuno", "Avena + leche + banana + 2 huevos ⚽ (comida importante pre-partido)", "09:00"),
-    ("sábado", "media_mañana", "Fruta o tostada ligera (antes del partido)", "10:30"),
-    ("sábado", "almuerzo", "Post-partido: pollo/carne + arroz/papa — recuperación 💪", "14:30"),
-    ("sábado", "merienda", "Yogur o fruta", "17:00"),
-    ("sábado", "cena", "Lo que haga la familia, priorizando proteína y verdura", "21:00"),
+    ("sábado", "desayuno", "Avena con leche + 1 banana + 2 huevos revueltos ⚽ (pre-partido)", "09:00", 600),
+    ("sábado", "media_mañana", "1 tostada con miel + 1 mandarina (liviano, antes del partido)", "10:30", 180),
+    ("sábado", "almuerzo", "Post-partido 💪: pechuga de pollo + papas al horno + ensalada", "14:30", 800),
+    ("sábado", "merienda", "Yogur natural con granola", "17:00", 250),
+    ("sábado", "cena", "Pizza casera (3 porciones) o empanadas de carne (4 unidades) — cena familiar", "21:00", 850),
     # DOMINGO (gym 11:00)
-    ("domingo", "desayuno", "Avena + leche + banana + 2 huevos 🏋️ (pre-gym)", "09:30"),
-    ("domingo", "almuerzo", "Post-gym: proteína + carbohidrato + verdura", "13:00"),
-    ("domingo", "merienda", "Merienda liviana — yogur o fruta", "17:00"),
-    ("domingo", "cena", "Cena familiar nutritiva 🍽️", "21:00"),
+    ("domingo", "desayuno", "Avena con leche + 1 banana + 2 huevos duros 🏋️ (pre-gym)", "09:30", 600),
+    ("domingo", "almuerzo", "Post-gym: asado familiar (vacío o pollo) + ensalada de papa + verduras a la parrilla", "13:00", 950),
+    ("domingo", "merienda", "Yogur natural + 1 fruta", "17:00", 250),
+    ("domingo", "cena", "Omelette de 3 huevos con queso y jamón + 2 tostadas + ensalada", "21:00", 750),
 ]
+
+# Tipo de día y objetivo calórico (todos los días de la rutina base tienen entrenamiento)
+DIA_TIPO_OBJETIVO = {
+    "lunes": ("día de fútbol", "2800-3000"),
+    "martes": ("día de gym", "2800-3000"),
+    "miércoles": ("día de gym", "2800-3000"),
+    "jueves": ("día de fútbol", "2800-3000"),
+    "viernes": ("día de tenis", "2800-3000"),
+    "sábado": ("partido de fútbol", "2800-3000"),
+    "domingo": ("día de gym", "2800-3000"),
+}
+# Nota: en un día SIN entrenamiento el objetivo es ~2500 kcal.
+OBJETIVO_DIA_DESCANSO = "~2500"
 
 
 def seed_comidas():
+    """Dieta v3: platos específicos + kcal. Se resiembra una sola vez (cuando ninguna fila tiene kcal)."""
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM comidas WHERE momento = 'media_mañana'")
-    media_count = c.fetchone()[0]
-    if media_count == 0:
+    c.execute("SELECT COUNT(*) FROM comidas WHERE kcal IS NOT NULL")
+    if c.fetchone()[0] == 0:
         c.execute("DELETE FROM comidas")
         c.executemany(
-            "INSERT INTO comidas (dia, momento, descripcion, hora_recordatorio) VALUES (?, ?, ?, ?)",
+            "INSERT INTO comidas (dia, momento, descripcion, hora_recordatorio, kcal) VALUES (?, ?, ?, ?, ?)",
             COMIDAS_BASE,
         )
         conn.commit()
-        logger.info("Dieta actualizada a v2 con media mañana.")
+        logger.info("Dieta actualizada a v3 con platos específicos y kcal.")
     conn.close()
 
 def get_comidas_dia(dia: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute(
-        "SELECT id, momento, descripcion, hora_recordatorio FROM comidas WHERE dia = ? ORDER BY hora_recordatorio",
+        "SELECT id, momento, descripcion, hora_recordatorio, kcal FROM comidas WHERE dia = ? ORDER BY hora_recordatorio",
         (dia,),
     )
     rows = c.fetchall()
@@ -403,7 +431,7 @@ def update_comida(dia: str, momento: str, descripcion: str):
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     c.execute(
-        "UPDATE comidas SET descripcion = ? WHERE dia = ? AND momento = ?",
+        "UPDATE comidas SET descripcion = ?, kcal = NULL WHERE dia = ? AND momento = ?",
         (descripcion, dia, momento),
     )
     conn.commit()
@@ -498,6 +526,15 @@ def save_tareas_del_plan(fecha: str, plan_texto: str):
             )
     conn.commit()
     conn.close()
+
+def refrescar_tareas_del_plan(fecha: str, plan_texto: str):
+    """Reemplaza los checkins NO respondidos de la fecha por las tareas del plan nuevo (evita duplicados al regenerar)."""
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM checkins_tareas WHERE fecha = ? AND cumplido IS NULL", (fecha,))
+    conn.commit()
+    conn.close()
+    save_tareas_del_plan(fecha, plan_texto)
 
 def marcar_checkins_tareas_sin_respuesta():
     """Marca como sin_respuesta las tareas de ayer que no fueron respondidas."""
@@ -735,8 +772,7 @@ MUN (ANU-AR) — 26, 27 y 28 de junio. Representa Liberia en AG3. Preparar: tóp
 Debate WSDC (ADA) — Sin fecha fija, práctica continua. Formato WSDC, mociones variadas.
 NASA ISSDC — DESLA — Competencia anual, preparación continua.
 Materias IGCSE — Siempre al día. Material en Kognity.
-Marketing/Instagram — Real Estate, sin deadline.
-{contexto_plan_semanal}"""
+Marketing/Instagram — Real Estate, sin deadline."""
 
 PROMPT_DIA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
 
@@ -754,14 +790,14 @@ RUTINA SEMANAL:
 {contexto_rutina_fija}FECHAS PRÓXIMAS CARGADAS:
 {fechas_db}
 
-{contexto_feriado}{contexto_rutina}Hoy es {dia_semana} {fecha_hoy}. Generá el plan para mañana ({dia_manana} {fecha_manana}).
+{contexto_feriado}{contexto_rutina}{contexto_checkins}{contexto_plan_semanal}Hoy es {dia_semana} {fecha_hoy}, son las 06:00 de la mañana. Generá el plan para HOY ({dia_plan} {fecha_plan}).
 
 REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 - No uses markdown: sin #, ##, **, ni ---
 - Usá emojis como separadores visuales
 - Estructura EXACTA (una línea por bloque, en este orden):
 
-📅 PLAN {dia_manana_upper} {fecha_manana} — FRANCO
+📅 PLAN {dia_plan_upper} {fecha_plan} — FRANCO
 🎓 8:30-17:00 Colegio
 💪 [hora inicio según día]-[hora fin] [entrenamiento del día: Fútbol / Gym / Tenis / Partido fútbol]
 🚿 [hora llegada a casa]-[hora llegada+45min] Baño + llegada
@@ -769,15 +805,22 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 ⭐ [hora inicio]-[hora fin] Estudio
 → [tarea específica 1 — nombre real del tema, no genérico]
 → [tarea específica 2 — priorizada por deadline más cercano]
+📖 [hora inicio]-[hora fin] Tiempo libre — lectura o coding personal (SOLO si sobra tiempo real, ver regla abajo)
 🔥 [frase motivadora, una sola línea, corta]
 
 - Nada más. Sin secciones extra, sin justificaciones, sin resumen.
 - Las tareas de estudio deben ser ESPECÍFICAS: no "estudiar MUN" sino "redactar posición de Liberia sobre financiamiento de misiones de paz".
 - Priorizá por orgencia (deadline más cercano primero).
-- Si el día siguiente no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
+- Si el día no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
 - Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
 
 REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
+
+REGLA DE FIDELIDAD — NO INVENTAR NADA:
+- Solo planificá con la información que te doy explícitamente en este prompt. No inventes actividades, horarios ni tareas que no estén en las fechas, rutina o contexto provisto.
+- Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
+- Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
+- Si mencionás una comida, siempre indicá un plato concreto y específico (ej: "Milanesa de carne con puré", "Pollo al horno con arroz"). Nunca uses descripciones genéricas de macronutrientes.
 
 REGLA DE DISTRIBUCIÓN DEL TIEMPO DE ESTUDIO:
 Si hay más de una tarea asignada al bloque de estudio, dividí el tiempo disponible equitativamente entre ellas y especificá el horario exacto de cada una.
@@ -800,6 +843,12 @@ Ejemplo para un bloque de 2 horas (viernes) con 3 tareas:
 → Debate WSDC: Leer moción y armar argumentos
 
 Nunca agrupes dos tareas distintas en el mismo bloque sin dividir el tiempo.
+
+REGLA DE TIEMPO LIBRE — HOBBY (lectura / coding personal):
+- Si después de cubrir TODAS las tareas académicas prioritarias sobra tiempo real en el día, asigná un bloque explícito de hobby (lectura o coding personal) en vez de dejar ese tiempo vacío o llenarlo con más estudio forzado.
+- El hobby SIEMPRE va después de todo lo académico prioritario, nunca antes.
+- Si sobra tiempo real, el bloque 📖 DEBE aparecer en el plan — no lo omitas. Si no sobra tiempo, omitilo.
+- Ejemplo: 📖 21:00-21:30 Tiempo libre — lectura o coding personal
 """
 
 PROMPT_SEMANA = """Sos el planificador personal de Franco, 15 años, Hudson, Buenos Aires.
@@ -830,6 +879,11 @@ IMPORTANTE:
 - Respetá los slots de estudio según el día
 
 REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
+
+REGLA DE FIDELIDAD — NO INVENTAR NADA:
+- Solo planificá con la información que te doy explícitamente en este prompt. No inventes actividades, horarios ni tareas que no estén en las fechas, rutina o contexto provisto.
+- Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
+- Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
 
 FORMATO — sin markdown, sin símbolos extra:
 
@@ -871,6 +925,11 @@ IMPORTANTE:
 
 REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
 
+REGLA DE FIDELIDAD — NO INVENTAR NADA:
+- Solo planificá con la información que te doy explícitamente en este prompt. No inventes actividades, horarios ni tareas que no estén en las fechas, rutina o contexto provisto.
+- Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
+- Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
+
 FORMATO — sin markdown, sin símbolos extra:
 
 📅 PRÓXIMOS 30 DÍAS
@@ -903,11 +962,18 @@ FECHAS PRÓXIMAS ESTA SEMANA:
 MODIFICACIONES PERMANENTES:
 {rutina_permanente}
 
-Generá un plan de estudio y preparación para cada día de la semana que empieza el {fecha_lunes}.
+Hoy es {fecha_hoy}. Generá un plan de estudio y preparación para cada día de la semana que empieza el {fecha_lunes}.
+Si {fecha_hoy} cae dentro de esa semana (regeneración a mitad de semana), NO asignes tareas a días anteriores a hoy — dejá esos días con campos vacíos.
 Para cada día indicá:
 - Bloque de estudio principal (tema + proyecto)
-- Tarea secundaria si hay tiempo (puede ser coding, Instagram, o proyecto menor)
+- Tarea secundaria si hay tiempo (puede ser coding, Instagram, o proyecto menor; si no hay nada académico urgente, puede ser tiempo libre de hobby: lectura o coding personal)
 - Prioridad del día (qué es lo más urgente)
+
+REGLA DE FIDELIDAD — NO INVENTAR NADA:
+- Solo planificá con la información que te doy explícitamente en este prompt. No inventes actividades, horarios ni tareas que no estén en las fechas, rutina o contexto provisto.
+- Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
+- Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
+- Si una fecha es un examen, Franco lo rinde en el colegio: solo asigná preparación ANTES del examen, nunca el día del examen ni después.
 
 Respondé ÚNICAMENTE en JSON con este formato exacto, sin texto adicional:
 {{"lunes": {{"prioridad": "...", "estudio_principal": "...", "secundario": "...", "nota": "..."}}, "martes": {{}}, "miércoles": {{}}, "jueves": {{}}, "viernes": {{}}, "sábado": {{}}, "domingo": {{}}}}"""
@@ -928,38 +994,72 @@ def _calendario_dias(fecha_inicio: datetime, n_dias: int) -> str:
 
 # ── Claude ────────────────────────────────────────────────────────────────────
 
+def _build_contexto_checkins() -> str:
+    """Tareas de ayer no cumplidas/parciales y tareas reprogramadas para hoy, para el prompt del plan diario."""
+    ahora_ar = datetime.now(AR_TZ)
+    hoy = ahora_ar.strftime("%d/%m/%Y")
+    ayer = (ahora_ar - timedelta(days=1)).strftime("%d/%m/%Y")
+    conn = sqlite3.connect("planner.db")
+    c = conn.cursor()
+    c.execute(
+        "SELECT tarea, proyecto, cumplido, nota FROM checkins_tareas "
+        "WHERE fecha = ? AND (cumplido IS NULL OR cumplido != 'si')",
+        (ayer,),
+    )
+    pendientes = c.fetchall()
+    c.execute(
+        "SELECT tarea, proyecto FROM tareas_reprogramadas WHERE fecha_nueva = ?",
+        (hoy,),
+    )
+    reprogramadas = c.fetchall()
+    conn.close()
+    partes = []
+    if pendientes:
+        lineas = []
+        for tarea, proyecto, cumplido, nota in pendientes:
+            extra = f" (llegó hasta: {nota})" if cumplido == "parcial" and nota else ""
+            lineas.append(f"- {tarea} [{proyecto}]{extra}")
+        partes.append("TAREAS DE AYER NO CUMPLIDAS (consideralas para hoy si siguen siendo relevantes):\n" + "\n".join(lineas))
+    if reprogramadas:
+        lineas = [f"- {t} [{p}]" for t, p in reprogramadas]
+        partes.append("TAREAS REPROGRAMADAS PARA HOY (incluilas en el plan):\n" + "\n".join(lineas))
+    if not partes:
+        return ""
+    return "\n\n".join(partes) + "\n\n"
+
 def generar_plan_texto():
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=120.0)
 
     ahora_ar = datetime.now(AR_TZ)
-    manana_ar = ahora_ar + timedelta(days=1)
+    # El plan diario es para HOY: se genera a las 06:00 del mismo dia que aplica.
+    dia_plan_dt = ahora_ar
 
     dias_es = {
         0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
         4: "viernes", 5: "sábado", 6: "domingo",
     }
     dia_semana = dias_es[ahora_ar.weekday()].capitalize()
-    dia_manana = dias_es[manana_ar.weekday()].capitalize()
-    dia_manana_upper = dia_manana.upper()
+    dia_plan = dias_es[dia_plan_dt.weekday()].capitalize()
+    dia_plan_upper = dia_plan.upper()
     fecha_hoy = ahora_ar.strftime("%d/%m/%Y")
-    fecha_manana = manana_ar.strftime("%d/%m/%Y")
+    fecha_plan = dia_plan_dt.strftime("%d/%m/%Y")
 
     rows = get_fechas()
     fechas_str = _format_fechas_para_prompt(rows)
 
-    if is_feriado(fecha_manana):
+    if is_feriado(fecha_plan):
         contexto_feriado = (
-            "DÍA ESPECIAL: Mañana es feriado o no hay colegio. No incluyas bloque de colegio "
+            "DÍA ESPECIAL: Hoy es feriado o no hay colegio. No incluyas bloque de colegio "
             "ni horario de levantarse a las 7:30. Tratalo como día libre — Franco puede organizar "
             "su tiempo desde cuando quiera. Mantené los entrenamientos si corresponde al día de la semana.\n\n"
         )
     else:
         contexto_feriado = ""
 
-    rutina_mod = get_rutina_modificada(fecha_manana)
+    rutina_mod = get_rutina_modificada(fecha_plan)
     if rutina_mod:
         contexto_rutina = (
-            f"CAMBIO DE RUTINA PARA MAÑANA: {rutina_mod}\n"
+            f"CAMBIO DE RUTINA PARA HOY: {rutina_mod}\n"
             "Tené esto en cuenta al armar el plan y ajustá los horarios accordingly.\n\n"
         )
     else:
@@ -985,11 +1085,11 @@ def generar_plan_texto():
             plan_json = json.loads(plan_semanal_row[0])
             dias_map = {0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
                         4: "viernes", 5: "sábado", 6: "domingo"}
-            dia_key = dias_map.get(manana_ar.weekday(), "")
+            dia_key = dias_map.get(dia_plan_dt.weekday(), "")
             if dia_key in plan_json:
                 dp = plan_json[dia_key]
                 contexto_plan_semanal = (
-                    f"\nPLAN SEMANAL PARA MAÑANA:\n"
+                    f"\nPLAN SEMANAL PARA HOY:\n"
                     f"- Prioridad: {dp.get('prioridad', '')}\n"
                     f"- Estudio principal: {dp.get('estudio_principal', '')}\n"
                     f"- Secundario: {dp.get('secundario', '')}\n"
@@ -1003,12 +1103,13 @@ def generar_plan_texto():
         contexto_franco=_build_contexto_prompt(),
         dia_semana=dia_semana,
         fecha_hoy=fecha_hoy,
-        dia_manana=dia_manana,
-        dia_manana_upper=dia_manana_upper,
-        fecha_manana=fecha_manana,
+        dia_plan=dia_plan,
+        dia_plan_upper=dia_plan_upper,
+        fecha_plan=fecha_plan,
         contexto_feriado=contexto_feriado,
         contexto_rutina=contexto_rutina,
         contexto_rutina_fija=contexto_rutina_fija,
+        contexto_checkins=_build_contexto_checkins(),
         contexto_plan_semanal=contexto_plan_semanal,
     )
 
@@ -1023,21 +1124,24 @@ def generar_plan_texto():
     # El modelo a veces recalcula el día de la semana incorrectamente para fechas futuras.
     # Forzamos la primera línea con los valores calculados por Python (siempre correctos).
     lineas_plan = plan.split("\n")
-    primera_linea_correcta = f"📅 PLAN {dia_manana_upper} {fecha_manana} — FRANCO"
+    primera_linea_correcta = f"📅 PLAN {dia_plan_upper} {fecha_plan} — FRANCO"
     if lineas_plan and lineas_plan[0].strip().startswith("📅"):
         lineas_plan[0] = primera_linea_correcta
         plan = "\n".join(lineas_plan)
 
-    save_plan(fecha_manana, plan)
-    return plan, fecha_manana
+    save_plan(fecha_plan, plan)
+    return plan, fecha_plan
 
 
-async def generar_plan_semanal(app):
-    """Genera y guarda el plan semanal. Se ejecuta automáticamente los domingos a las 21:00."""
-    logger.info("Generando plan semanal...")
+async def generar_plan_semanal(app, semana_inicio: str = None):
+    """Genera y guarda el plan semanal.
+    - Sin argumento: semana próxima (job automático de los domingos 21:00).
+    - Con semana_inicio (YYYY-MM-DD): esa semana (usado para regenerar la semana en curso)."""
+    logger.info(f"Generando plan semanal (semana_inicio={semana_inicio})...")
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=180.0)
-        semana_inicio = _lunes_semana_proxima()
+        if semana_inicio is None:
+            semana_inicio = _lunes_semana_proxima()
         fecha_lunes_dt = datetime.strptime(semana_inicio, "%Y-%m-%d")
         fecha_lunes_str = fecha_lunes_dt.strftime("%d/%m/%Y")
 
@@ -1056,6 +1160,7 @@ async def generar_plan_semanal(app):
             contexto_franco=_build_contexto_prompt(),
             rutina_permanente=rutina_perm_str,
             fecha_lunes=fecha_lunes_str,
+            fecha_hoy=datetime.now(AR_TZ).strftime("%d/%m/%Y"),
         )
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -1102,6 +1207,36 @@ async def generar_plan_semanal(app):
     except Exception as e:
         logger.error(f"Error generando plan semanal: {e}")
         await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al generar plan semanal: {e}")
+
+
+def _fecha_cae_esta_semana(fecha_ddmmyyyy: str) -> bool:
+    """True si la fecha cae entre hoy y el domingo de la semana en curso (inclusive)."""
+    try:
+        d, m, y = fecha_ddmmyyyy.split("/")
+        fecha_d = datetime(int(y), int(m), int(d)).date()
+    except Exception:
+        return False
+    ahora = datetime.now(AR_TZ)
+    hoy = ahora.date()
+    domingo = (ahora + timedelta(days=6 - ahora.weekday())).date()
+    return hoy <= fecha_d <= domingo
+
+
+async def regenerar_por_fecha_nueva(app):
+    """Regenera el plan semanal de la semana en curso y el plan diario de hoy.
+    Se llama cuando Franco carga una fecha nueva que cae dentro de la semana en curso.
+    (Franco prefiere precisión sobre ahorro de tokens.)"""
+    await generar_plan_semanal(app, semana_inicio=_lunes_semana_actual())
+    try:
+        plan, fecha_plan = generar_plan_texto()
+        refrescar_tareas_del_plan(fecha_plan, plan)
+        await app.bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"📅 Plan de hoy actualizado ({fecha_plan}):\n\n{plan}",
+        )
+    except Exception as e:
+        logger.error(f"Error regenerando plan diario tras fecha nueva: {e}")
+        await app.bot.send_message(chat_id=CHAT_ID, text=f"❌ Error al regenerar el plan de hoy: {e}")
 
 
 async def _enviar_plan_multipartes(reply_obj, texto: str):
@@ -1290,7 +1425,7 @@ def _texto_rutina_fija(rows):
     return "⚙️ RUTINA FIJA\n\nNo hay eventos fijos cargados."
 
 _MOMENTO_EMOJI = {
-    "desayuno": "🌅",
+    "desayuno": "🍳",
     "media_mañana": "🍎",
     "almuerzo": "☀️",
     "merienda": "🌤️",
@@ -1298,15 +1433,24 @@ _MOMENTO_EMOJI = {
 }
 
 def _texto_dieta_hoy(dia: str, rows) -> str:
-    dias_upper = {
-        "lunes": "LUNES", "martes": "MARTES", "miércoles": "MIÉRCOLES",
-        "jueves": "JUEVES", "viernes": "VIERNES", "sábado": "SÁBADO", "domingo": "DOMINGO",
-    }
-    titulo = dias_upper.get(dia, dia.upper())
-    texto = f"🥗 DIETA DE HOY — {titulo}\n"
-    for _, momento, descripcion, hora in rows:
+    tipo, objetivo = DIA_TIPO_OBJETIVO.get(dia, ("", "2800-3000"))
+    titulo = dia.capitalize()
+    texto = f"🥗 DIETA DE HOY — {titulo}" + (f" ({tipo})" if tipo else "") + "\n"
+    total = 0
+    hay_sin_kcal = False
+    for _, momento, descripcion, hora, kcal in rows:
         emoji = _MOMENTO_EMOJI.get(momento, "🍽️")
-        texto += f"\n{emoji} {momento.capitalize()} ({hora})\n→ {descripcion}\n"
+        if kcal:
+            kcal_str = f" — {kcal} kcal"
+            total += kcal
+        else:
+            kcal_str = " — kcal s/d"
+            hay_sin_kcal = True
+        texto += f"\n{emoji} {momento.replace('_', ' ').capitalize()} ({hora}){kcal_str}\n{descripcion}\n"
+    aprox = "~" if hay_sin_kcal else ""
+    texto += f"\n📊 Total del día: {aprox}{total} / {objetivo} kcal objetivo"
+    if hay_sin_kcal:
+        texto += "\n(s/d: comida editada a mano, kcal no calculada)"
     return texto
 
 
@@ -1328,16 +1472,20 @@ def _texto_dieta_semana() -> str:
     conn = sqlite3.connect("planner.db")
     c = conn.cursor()
     for dia in dias_orden:
-        c.execute("SELECT momento, descripcion, hora_recordatorio FROM comidas WHERE dia = ? ORDER BY hora_recordatorio", (dia,))
+        c.execute("SELECT momento, descripcion, hora_recordatorio, kcal FROM comidas WHERE dia = ? ORDER BY hora_recordatorio", (dia,))
         rows = c.fetchall()
         if not rows:
             continue
         label = dias_labels.get(dia, dia.upper())
         texto += f"📅 {label}\n"
-        for momento, descripcion, hora in rows:
+        total = 0
+        for momento, descripcion, hora, kcal in rows:
             emoji = _MOMENTO_EMOJI.get(momento, "🍽️")
-            texto += f"{emoji} {momento.replace('_', ' ').capitalize()} ({hora}): {descripcion}\n"
-        texto += "\n"
+            kcal_str = f" — {kcal} kcal" if kcal else ""
+            if kcal:
+                total += kcal
+            texto += f"{emoji} {momento.replace('_', ' ').capitalize()} ({hora}): {descripcion}{kcal_str}\n"
+        texto += f"📊 Total: {total} kcal\n\n"
     conn.close()
     texto += "✅ Está bien: asado familiar, comida casera, flexibilidad fin de semana\n"
     texto += "❌ Evitar: frituras, gaseosas, ultraprocesados, exceso azúcar"
@@ -1370,6 +1518,11 @@ async def cmd_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_fecha(fecha, evento, horario, material)
     extra = f" a las {horario}" if horario else ""
     await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}{extra}")
+    if _fecha_cae_esta_semana(fecha):
+        await update.message.reply_text(
+            "🔄 La fecha cae en la semana en curso — regenerando plan semanal y plan de hoy..."
+        )
+        await regenerar_por_fecha_nueva(context.application)
 
 async def cmd_fechas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = get_fechas()
@@ -1442,7 +1595,8 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             f"📭 No hay plan guardado para hoy ({hoy}).\n"
-            "Usá /generar para crear el plan de mañana."
+            "El plan de hoy se genera automáticamente a las 06:00.\n"
+            "Usá /generar para crearlo ahora."
         )
 
 async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1529,7 +1683,11 @@ async def cmd_contexto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_plansemanal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Generando plan semanal con Claude, esperá un momento...")
     try:
-        await generar_plan_semanal(context.application)
+        # A mitad de semana regenera la semana EN CURSO; los domingos genera la próxima (como el job).
+        if datetime.now(AR_TZ).weekday() == 6:
+            await generar_plan_semanal(context.application)
+        else:
+            await generar_plan_semanal(context.application, semana_inicio=_lunes_semana_actual())
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
@@ -1591,7 +1749,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(
                 f"📭 No hay plan guardado para hoy ({hoy}).\n"
-                "Tocá ⚡ Generar plan para crear el plan de mañana."
+                "El plan de hoy se genera automáticamente a las 06:00.\n"
+                "Tocá ⚡ Generar plan para crearlo ahora."
             )
 
     elif data == "generar":
@@ -1774,7 +1933,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"FECHAS PRÓXIMAS:\n{fechas_str}\n\n"
                 f"Ahora son las {hora_actual} del {dia_semana}.\n\n"
                 "Respondé en 3 líneas máximo qué debería estar haciendo Franco en este momento o qué debería hacer a continuación. "
-                "Sé muy específico y directo. Sin introducción, sin explicaciones largas.\n\n"
+                "Sé muy específico y directo. Sin introducción, sin explicaciones largas.\n"
+                "Usá SOLO la información provista arriba: no inventes actividades, horarios ni tareas. "
+                "Si un evento ya ocurrió hoy más temprano, no lo menciones como pendiente.\n\n"
                 "FORMATO:\n"
                 f"🕐 Son las {hora_actual}\n"
                 "→ [qué hacer ahora mismo]\n"
@@ -1859,6 +2020,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Dieta ─────────────────────────────────────────────────────────────────
 
     elif data == "dieta":
+        ahora_ar = datetime.now(AR_TZ)
+        dias_es = {
+            0: "lunes", 1: "martes", 2: "miércoles", 3: "jueves",
+            4: "viernes", 5: "sábado", 6: "domingo",
+        }
+        dia_hoy = dias_es[ahora_ar.weekday()]
+        rows = get_comidas_dia(dia_hoy)
+        texto = _texto_dieta_hoy(dia_hoy, rows)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Ver semana completa", callback_data="dieta_semana")],
+            [InlineKeyboardButton("✏️ Editar una comida", callback_data="editar_comida")],
+        ])
+        await query.edit_message_text(texto, reply_markup=kb)
+
+    elif data == "dieta_semana":
         texto = _texto_dieta_semana()
         if len(texto) > 4000:
             mid = texto[:4000].rfind('\n📅')
@@ -2073,6 +2249,11 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         extra = f" a las {horario}" if horario else ""
         await update.message.reply_text(f"✅ Fecha guardada: {fecha} — {evento}{extra}")
+        if _fecha_cae_esta_semana(fecha):
+            await update.message.reply_text(
+                "🔄 La fecha cae en la semana en curso — regenerando plan semanal y plan de hoy..."
+            )
+            await regenerar_por_fecha_nueva(context.application)
 
     elif estado == 'esperando_fecha_rutina':
         try:
@@ -2148,18 +2329,19 @@ def limpiar_fechas_pasadas():
     c = conn.cursor()
     c.execute("""
         DELETE FROM fechas
-        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) < date('now')
-    """)
+        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) < date(?)
+    """, (_hoy_ar_iso(),))
     conn.commit()
     conn.close()
     logger.info("Limpieza de fechas pasadas completada.")
 
-async def job_noche(app):
-    logger.info("Ejecutando cron job nocturno...")
+async def job_plan_diario(app):
+    """Genera y envia el plan de HOY — corre todos los dias a las 06:00 AR."""
+    logger.info("Ejecutando cron job del plan diario (06:00)...")
     try:
         plan, fecha = generar_plan_texto()
         save_tareas_del_plan(fecha, plan)
-        mensaje = f"🌙 Plan para mañana ({fecha}):\n\n{plan}"
+        mensaje = f"🌅 Plan para hoy ({fecha}):\n\n{plan}"
         await app.bot.send_message(chat_id=CHAT_ID, text=mensaje)
         logger.info("Plan enviado exitosamente.")
     except Exception as e:
@@ -2311,10 +2493,10 @@ async def recordatorio_mochila(app):
     c.execute("""
         SELECT fecha, evento, horario, material
         FROM fechas
-        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date('now', 'localtime')
+        WHERE date(substr(fecha,7,4)||'-'||substr(fecha,4,2)||'-'||substr(fecha,1,2)) >= date(?)
         ORDER BY substr(fecha,7,4)||substr(fecha,4,2)||substr(fecha,1,2)
         LIMIT 10
-    """)
+    """, (_hoy_ar_iso(),))
     fechas = c.fetchall()
     conn.close()
     fechas_texto = "\n".join([
@@ -2330,7 +2512,9 @@ async def recordatorio_mochila(app):
         f"FECHAS PRÓXIMAS:\n{fechas_texto}\n\n"
         f"Son las 16:35. Franco está por irse a casa. Esta noche tiene {tiempo_estudio} de estudio.\n\n"
         "Decile exactamente qué tiene que meter en la mochila para estudiar esta noche, basándote en las fechas más urgentes. "
-        "Mencioná el material específico y para cuándo vence.\n\n"
+        "Mencioná el material específico y para cuándo vence. "
+        "Usá SOLO las fechas listadas arriba: no inventes eventos ni material. "
+        "Si un evento es HOY, ya ocurrió en el colegio — no lo incluyas.\n\n"
         "FORMATO — sin markdown, máximo 5 líneas:\n\n"
         "🎒 Metete en la mochila:\n"
         "→ [material específico] — para [evento] ([fecha])\n"
@@ -2384,9 +2568,9 @@ def main():
     # Mensajes de texto (hola/menu + estados de conversación)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_mensaje))
 
-    # Scheduler — 22:00 hora Argentina
+    # Scheduler — plan diario 06:00 hora Argentina (el plan del dia se genera esa misma manana)
     scheduler = AsyncIOScheduler(timezone=AR_TZ)
-    scheduler.add_job(job_noche, trigger="cron", hour=22, minute=0, args=[app])
+    scheduler.add_job(job_plan_diario, trigger="cron", hour=6, minute=0, args=[app])
     scheduler.add_job(limpiar_fechas_pasadas, trigger="cron", hour=0, minute=0)
     scheduler.add_job(recordatorio_uniforme, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=7, minute=25, args=[app])
 
@@ -2396,7 +2580,7 @@ def main():
     scheduler.add_job(recordatorio_mochila, trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=16, minute=35, args=[app])
     _schedule_meal_reminders(scheduler, app)
     scheduler.start()
-    logger.info("Scheduler iniciado. Cron job programado para las 22:00 AR.")
+    logger.info("Scheduler iniciado. Plan diario programado para las 06:00 AR.")
 
     logger.info("Bot iniciado.")
     app.run_polling(drop_pending_updates=True)
