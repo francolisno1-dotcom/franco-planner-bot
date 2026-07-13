@@ -148,6 +148,27 @@ def _hoy_ar_iso() -> str:
     """Fecha de HOY en hora Argentina, formato YYYY-MM-DD (el servidor corre en UTC)."""
     return datetime.now(AR_TZ).strftime("%Y-%m-%d")
 
+def _parse_ddmmyyyy(fecha_str: str):
+    """DD/MM/AAAA -> date, o None si no parsea."""
+    try:
+        return datetime.strptime(fecha_str, "%d/%m/%Y").date()
+    except (ValueError, TypeError):
+        return None
+
+def _etiqueta_relativa(fecha_str: str) -> str:
+    """Etiqueta HOY/MAÑANA/en N días calculada en Python (nunca dejar que Claude la calcule)."""
+    d = _parse_ddmmyyyy(fecha_str)
+    if d is None:
+        return ""
+    delta = (d - datetime.now(AR_TZ).date()).days
+    if delta < 0:
+        return f"[hace {-delta} días — YA PASÓ]"
+    if delta == 0:
+        return "[HOY]"
+    if delta == 1:
+        return "[MAÑANA]"
+    return f"[en {delta} días]"
+
 def get_fechas():
     """Devuelve solo fechas cuyo dia NO paso todavia (comparado en hora Argentina)."""
     conn = sqlite3.connect("planner.db")
@@ -191,7 +212,8 @@ def _format_fechas_para_prompt(rows) -> str:
     lines = []
     for r in rows:
         # r = (id, fecha, evento, horario, material)
-        linea = f"- {r[1]}: {r[2]}"
+        etiqueta = _etiqueta_relativa(r[1])
+        linea = f"- {r[1]} {etiqueta}: {r[2]}" if etiqueta else f"- {r[1]}: {r[2]}"
         if r[3]:  # horario
             linea += f" - Horario: {r[3]}"
         if r[4]:  # material
@@ -787,7 +809,7 @@ RUTINA SEMANAL:
 
 {contexto_franco}
 
-{contexto_rutina_fija}FECHAS PRÓXIMAS CARGADAS:
+{contexto_rutina_fija}{eventos_hoy}FECHAS PRÓXIMAS CARGADAS (todas son FUTURAS — ninguna es hoy; la etiqueta [MAÑANA] / [en N días] ya viene calculada):
 {fechas_db}
 
 {contexto_feriado}{contexto_rutina}{contexto_checkins}{contexto_plan_semanal}Hoy es {dia_semana} {fecha_hoy}, son las 06:00 de la mañana. Generá el plan para HOY ({dia_plan} {fecha_plan}).
@@ -820,6 +842,7 @@ REGLA DE FIDELIDAD — NO INVENTAR NADA:
 - Solo planificá con la información que te doy explícitamente en este prompt. No inventes actividades, horarios ni tareas que no estén en las fechas, rutina o contexto provisto.
 - Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
 - Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
+- Cuando menciones cuándo es un examen o evento, copiá la etiqueta relativa que viene en la lista ([MAÑANA], [en N días]) — NUNCA calcules vos si algo es "hoy" o "mañana". Está prohibido escribir "examen mañana" salvo que la fecha tenga la etiqueta [MAÑANA].
 - Si mencionás una comida, siempre indicá un plato concreto y específico (ej: "Milanesa de carne con puré", "Pollo al horno con arroz"). Nunca uses descripciones genéricas de macronutrientes.
 
 REGLA DE DISTRIBUCIÓN DEL TIEMPO DE ESTUDIO:
@@ -1045,7 +1068,27 @@ def generar_plan_texto():
     fecha_plan = dia_plan_dt.strftime("%d/%m/%Y")
 
     rows = get_fechas()
-    fechas_str = _format_fechas_para_prompt(rows)
+    # Separar eventos de HOY: pasan el filtro >= hoy (a las 06:00 aún no ocurrieron),
+    # pero NO deben llegar como "fechas próximas" estudiables — ocurren durante el día
+    # (horario escolar) y a la noche ya habrán pasado.
+    hoy_date = ahora_ar.date()
+    rows_hoy = [r for r in rows if _parse_ddmmyyyy(r[1]) == hoy_date]
+    rows_futuras = [r for r in rows if _parse_ddmmyyyy(r[1]) is not None and _parse_ddmmyyyy(r[1]) > hoy_date]
+    fechas_str = _format_fechas_para_prompt(rows_futuras) if rows_futuras else "No hay fechas cargadas."
+
+    if rows_hoy:
+        lineas_hoy = []
+        for r in rows_hoy:
+            linea = f"- {r[2]}" + (f" - Horario: {r[3]}" if r[3] else " (en horario escolar u horario del propio evento)")
+            lineas_hoy.append(linea)
+        eventos_hoy = (
+            "EVENTOS DE HOY (ocurren durante el día de hoy):\n" + "\n".join(lineas_hoy) + "\n"
+            "REGLA CRÍTICA sobre estos eventos: cuando llegue el bloque de estudio de esta noche YA HABRÁN OCURRIDO. "
+            "NO asignes estudio, repaso ni preparación para ellos — ni esta noche ni en ningún bloque del plan. "
+            "Solo tenelos en cuenta si cambian la estructura del día (ej: un evento de 'todo el día' bloquea el día completo).\n\n"
+        )
+    else:
+        eventos_hoy = ""
 
     if is_feriado(fecha_plan):
         contexto_feriado = (
@@ -1100,6 +1143,7 @@ def generar_plan_texto():
 
     prompt = PROMPT_DIA.format(
         fechas_db=fechas_str,
+        eventos_hoy=eventos_hoy,
         contexto_franco=_build_contexto_prompt(),
         dia_semana=dia_semana,
         fecha_hoy=fecha_hoy,
@@ -1146,11 +1190,7 @@ async def generar_plan_semanal(app, semana_inicio: str = None):
         fecha_lunes_str = fecha_lunes_dt.strftime("%d/%m/%Y")
 
         rows = get_fechas()
-        fechas_semana = [
-            f"{f} — {e}" + (f" ({h})" if h else "") + (f" | Material: {m}" if m else "")
-            for _, f, e, h, m in rows
-        ]
-        fechas_str = "\n".join(fechas_semana) if fechas_semana else "Sin fechas próximas."
+        fechas_str = _format_fechas_para_prompt(rows)
 
         rows_perm = get_rutinas_permanentes()
         rutina_perm_str = "\n".join(f"- {d}" for _, _, d in rows_perm) if rows_perm else "Sin modificaciones permanentes."
@@ -2500,7 +2540,7 @@ async def recordatorio_mochila(app):
     fechas = c.fetchall()
     conn.close()
     fechas_texto = "\n".join([
-        f"{f[0]} - {f[1]}"
+        f"{f[0]} {_etiqueta_relativa(f[0])} - {f[1]}"
         + (f" - Horario: {f[2]}" if f[2] else "")
         + (f" - Material: {f[3]}" if f[3] else "")
         for f in fechas
