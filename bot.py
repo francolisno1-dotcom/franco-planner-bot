@@ -1072,15 +1072,18 @@ def generar_plan_texto():
     # pero NO deben llegar como "fechas próximas" estudiables — ocurren durante el día
     # (horario escolar) y a la noche ya habrán pasado.
     hoy_date = ahora_ar.date()
-    rows_hoy = [r for r in rows if _parse_ddmmyyyy(r[1]) == hoy_date]
+    # Endurecido: eventos de HOY SIN horario (examenes/eventos en horario escolar) se
+    # descartan por completo — no llegan ni como texto al prompt. Solo se muestran
+    # los de hoy CON horario propio (ej: "todo el día", "18:00"), que afectan la
+    # estructura del día.
+    rows_hoy = [r for r in rows if _parse_ddmmyyyy(r[1]) == hoy_date and r[3]]
     rows_futuras = [r for r in rows if _parse_ddmmyyyy(r[1]) is not None and _parse_ddmmyyyy(r[1]) > hoy_date]
     fechas_str = _format_fechas_para_prompt(rows_futuras) if rows_futuras else "No hay fechas cargadas."
 
     if rows_hoy:
         lineas_hoy = []
         for r in rows_hoy:
-            linea = f"- {r[2]}" + (f" - Horario: {r[3]}" if r[3] else " (en horario escolar u horario del propio evento)")
-            lineas_hoy.append(linea)
+            lineas_hoy.append(f"- {r[2]} - Horario: {r[3]}")
         eventos_hoy = (
             "EVENTOS DE HOY (ocurren durante el día de hoy):\n" + "\n".join(lineas_hoy) + "\n"
             "REGLA CRÍTICA sobre estos eventos: cuando llegue el bloque de estudio de esta noche YA HABRÁN OCURRIDO. "
