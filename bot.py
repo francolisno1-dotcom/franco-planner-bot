@@ -832,7 +832,7 @@ REGLAS DE FORMATO — seguí esto de forma ESTRICTA, sin excepciones:
 
 - Nada más. Sin secciones extra, sin justificaciones, sin resumen.
 - Las tareas de estudio deben ser ESPECÍFICAS: no "estudiar MUN" sino "redactar posición de Liberia sobre financiamiento de misiones de paz".
-- Priorizá por orgencia (deadline más cercano primero).
+- No priorices por cercanía de deadline: aplicá estudio distribuido (ver regla abajo).
 - Si el día no tiene entrenamiento (domingo libre o similar), omitís 💪 y 🚿.
 - Si hay DÍA ESPECIAL indicado arriba, omitís el bloque 🎓 colegio y adaptás el plan a día libre.
 
@@ -844,6 +844,12 @@ REGLA DE FIDELIDAD — NO INVENTAR NADA:
 - Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
 - Cuando menciones cuándo es un examen o evento, copiá la etiqueta relativa que viene en la lista ([MAÑANA], [en N días]) — NUNCA calcules vos si algo es "hoy" o "mañana". Está prohibido escribir "examen mañana" salvo que la fecha tenga la etiqueta [MAÑANA].
 - Si mencionás una comida, siempre indicá un plato concreto y específico (ej: "Milanesa de carne con puré", "Pollo al horno con arroz"). Nunca uses descripciones genéricas de macronutrientes.
+
+REGLA DE ESTUDIO DISTRIBUIDO (spaced repetition) — MUY IMPORTANTE:
+- Para fechas con más de 7 días de anticipación ([en N días] con N mayor a 7), NO esperes a último momento para planificar. Asigná una tarea CHICA y concreta (ej: 1 ejercicio, 1 pregunta de past paper, 20 min de repaso) por día o cada pocos días, distribuida en el tiempo, en vez de concentrar todo el estudio cerca de la fecha.
+- El repaso intensivo se reserva SOLO para el último día o los últimos dos días antes del evento — y ya no es la única preparación, es el cierre de algo que se vino trabajando de a poco.
+- La tarea distribuida es chica y sostenible (10-20 min) y convive con las otras prioridades del día (otras materias, proyectos, deportes). No es un bloque entero.
+- No uses la lógica de "cuanto más cerca la fecha, más prioridad": usá "empezar temprano con dosis chicas, sostenido en el tiempo, e intensificar recién al final".
 
 REGLA DE DISTRIBUCIÓN DEL TIEMPO DE ESTUDIO:
 Si hay más de una tarea asignada al bloque de estudio, dividí el tiempo disponible equitativamente entre ellas y especificá el horario exacto de cada una.
@@ -898,7 +904,7 @@ Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 7 días.
 IMPORTANTE:
 - Máximo 2 tareas por día
 - Una línea por tarea, sin explicaciones ni justificaciones
-- Distribuí por orgencia, deadline más cercano primero
+- Estudio distribuido: para fechas a más de 7 días, tareas chicas y recurrentes repartidas en los días (no cramming); el repaso intensivo solo el último día o los dos últimos antes del evento
 - Respetá los slots de estudio según el día
 
 REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
@@ -943,7 +949,7 @@ Hoy es {fecha_hoy}. Generá un plan de preparación para los próximos 30 días.
 IMPORTANTE:
 - Máximo 2 tareas por día
 - Una línea por tarea, sin explicaciones ni justificaciones
-- Distribuí por orgencia, deadline más cercano primero
+- Estudio distribuido: para fechas a más de 7 días, tareas chicas y recurrentes repartidas en los días (no cramming); el repaso intensivo solo el último día o los dos últimos antes del evento
 - Respetá los slots de estudio según el día
 
 REGLA IMPORTANTE — EXÁMENES: Si una fecha es un examen, Franco lo da en el colegio en horario escolar. NO asignes tareas de "rendir el examen" ni "dar el examen" en el plan — eso pasa solo en el colegio. Lo único que podés asignar es preparación o repaso ANTES de la fecha del examen, no el día del examen en sí. El día del examen simplemente no aparece como tarea de estudio.
@@ -997,6 +1003,18 @@ REGLA DE FIDELIDAD — NO INVENTAR NADA:
 - Nunca inventes horarios que Franco no especificó. Si una fecha dice "todo el día", bloqueá el día completo. Si no da horario, no asumas uno — usá la descripción tal cual la cargó.
 - Si un evento ya ocurrió hoy más temprano (ej: un examen que se rindió a la mañana en el colegio), no lo incluyas como pendiente de preparar esta noche.
 - Si una fecha es un examen, Franco lo rinde en el colegio: solo asigná preparación ANTES del examen, nunca el día del examen ni después.
+
+REGLA DE ESTUDIO DISTRIBUIDO (spaced repetition) — MUY IMPORTANTE:
+- Para fechas con más de 7 días de anticipación, NO esperes a último momento. Asigná una tarea CHICA y concreta (ej: 1 ejercicio, 1 pregunta de past paper, 20 min de repaso) por día o cada pocos días, distribuida a lo largo de la semana, en vez de concentrar todo cerca de la fecha.
+- El repaso intensivo se reserva solo para el último día o los dos últimos antes del evento.
+- Las tareas distribuidas son chicas (10-20 min) y conviven con las demás prioridades — no llenes un día con una sola materia.
+- Reemplazá "cuanto más cerca la fecha, más prioridad" por "empezar temprano con dosis chicas, sostenido, e intensificar recién al final".
+
+PREPARACIÓN IGCSE (examen final a mediados de octubre 2026) — arrancá YA con dosis chicas:
+- Materias IGCSE con examen final en octubre: Biology, Español-Literatura (unificada, es una sola materia), English Literature, English Language, Business Studies, Maths IGCSE.
+- Cada semana repartí tareas chicas y concretas de estas materias a lo largo de los días disponibles. NO pongas las 6 el mismo día: distribuilas (ej. lunes Biology, martes Maths IGCSE, miércoles Business, etc.) según el espacio de cada día.
+- Ejemplos de tarea chica: "1 past paper question de Maths IGCSE", "leer y anotar 2 páginas de Biology", "1 análisis corto de un texto de English Literature".
+- Dentro de estas 6, priorizá las que el CONTEXTO ACTUAL de Franco marque como más difíciles o que necesiten más refuerzo.
 
 Respondé ÚNICAMENTE en JSON con este formato exacto, sin texto adicional:
 {{"lunes": {{"prioridad": "...", "estudio_principal": "...", "secundario": "...", "nota": "..."}}, "martes": {{}}, "miércoles": {{}}, "jueves": {{}}, "viernes": {{}}, "sábado": {{}}, "domingo": {{}}}}"""
@@ -1374,12 +1392,84 @@ def _build_main_keyboard():
             InlineKeyboardButton("🥗 Mi dieta", callback_data="dieta"),
         ],
         [
-            InlineKeyboardButton("🧠 Mi contexto", callback_data="contexto"),
+            InlineKeyboardButton("📝 Mi contexto", callback_data="contexto"),
         ],
         [
             InlineKeyboardButton("⚙️ Editar rutina fija", callback_data="rutina_fija"),
         ],
     ])
+
+def _build_contexto_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📚 Materia", callback_data="ctx_cat|materia"),
+            InlineKeyboardButton("🎯 Proyecto", callback_data="ctx_cat|proyecto"),
+        ],
+        [
+            InlineKeyboardButton("🗓️ General", callback_data="ctx_cat|general"),
+            InlineKeyboardButton("➕ Nueva categoría", callback_data="ctx_cat_nueva"),
+        ],
+        [InlineKeyboardButton("📖 Ver mi contexto", callback_data="ctx_ver")],
+    ])
+
+# Preguntas de texto libre por categoría
+_CTX_PROMPTS = {
+    "materia": "Contame qué materia y qué cambió\n(ej: Biology — necesito reforzar mucho para el IGCSE de octubre)",
+    "proyecto": "Contame qué proyecto y su estado\n(ej: OMA — arranco preparación, prioridad alta)",
+    "general": "Contame el dato general\n(ej: sueño — durmiendo mejor esta semana)",
+}
+
+def _extraer_clave_valor(texto: str):
+    """Extrae (clave, valor) de texto libre. Separadores: — – - : |. Si no hay, primera palabra = clave."""
+    for sep in ["—", "–", " - ", ":", "|"]:
+        if sep in texto:
+            clave, _, valor = texto.partition(sep)
+            clave, valor = clave.strip(), valor.strip()
+            if clave and valor:
+                return clave, valor
+    partes = texto.strip().split(None, 1)
+    if len(partes) == 2:
+        return partes[0].strip(), partes[1].strip()
+    return texto.strip(), texto.strip()
+
+def _canonicalizar_clave(clave: str) -> str:
+    """Si la clave coincide (exacta o parcial, case-insensitive) con una materia/proyecto ya conocido, usa el nombre canónico."""
+    conocidas = [e[1] for e in CONTEXTO_INICIAL] + [r[1] for r in get_contexto_franco()]
+    cl = clave.lower().strip()
+    if not cl:
+        return clave
+    for nombre in conocidas:
+        if nombre.lower() == cl:
+            return nombre
+    for nombre in conocidas:
+        nl = nombre.lower()
+        if cl in nl or nl in cl:
+            return nombre
+    return clave
+
+def _texto_contexto_actual() -> str:
+    rows = get_contexto_franco()
+    if not rows:
+        return "📖 CONTEXTO ACTUAL\n\nℹ️ Sin contexto cargado todavía. Tocá una categoría para agregar."
+    by_cat = {}
+    for cat, clave, valor in rows:
+        by_cat.setdefault(cat, []).append((clave, valor))
+    cat_labels = {"materia": "📚 Materias", "proyecto": "🎯 Proyectos", "general": "🗓️ General"}
+    lines = ["📖 CONTEXTO ACTUAL\n"]
+    for cat in ["materia", "proyecto", "general"]:
+        if cat not in by_cat:
+            continue
+        lines.append(cat_labels[cat])
+        for clave, valor in by_cat[cat]:
+            lines.append(f"  • {clave}: {valor}")
+        lines.append("")
+    for cat, items in by_cat.items():
+        if cat not in cat_labels:
+            lines.append(f"  {cat.capitalize()}")
+            for clave, valor in items:
+                lines.append(f"  • {clave}: {valor}")
+            lines.append("")
+    return "\n".join(lines)[:4000]
 
 def _build_rutina_fija_keyboard(rows):
     """Keyboard para la pantalla principal de rutina fija."""
@@ -1684,9 +1774,9 @@ async def cmd_contexto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args or len(args) < 2:
         await update.message.reply_text(
-            "Uso: /contexto [clave] [descripción]\n"
-            "Ejemplo: /contexto Italiano ahora me sale bien\n\n"
-            "Las claves de materias y proyectos se detectan automáticamente."
+            "📝 MI CONTEXTO\n\n¿Qué querés cargar o revisar?\n"
+            "(atajo rápido: /contexto [clave] [descripción])",
+            reply_markup=_build_contexto_menu_keyboard(),
         )
         return
     clave = args[0]
@@ -2138,34 +2228,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     elif data == "contexto":
-        rows = get_contexto_franco()
-        if not rows:
-            await query.edit_message_text("ℹ️ Sin contexto cargado. Usá /contexto para agregar.")
-            return
-        by_cat = {}
-        for cat, clave, valor in rows:
-            by_cat.setdefault(cat, []).append((clave, valor))
-        cat_labels = {"materia": "📚 Materias", "proyecto": "🎯 Proyectos", "general": "⚙️ General"}
-        lines = ["🧠 CONTEXTO ACTUAL\n"]
-        for cat in ["materia", "proyecto", "general"]:
-            if cat not in by_cat:
-                continue
-            lines.append(cat_labels[cat])
-            for clave, valor in by_cat[cat]:
-                lines.append(f"  • {clave}: {valor}")
-            lines.append("")
-        for cat, items in by_cat.items():
-            if cat not in cat_labels:
-                lines.append(f"  {cat.capitalize()}")
-                for clave, valor in items:
-                    lines.append(f"  • {clave}: {valor}")
-                lines.append("")
-        lines.append("Usá /contexto [clave] [descripción] para actualizar.")
-        texto = "\n".join(lines)
-        if len(texto) > 4000:
-            await query.edit_message_text(texto[:4000])
-        else:
-            await query.edit_message_text(texto)
+        await query.edit_message_text(
+            "📝 MI CONTEXTO\n\n¿Qué querés cargar o revisar?",
+            reply_markup=_build_contexto_menu_keyboard(),
+        )
+
+    elif data == "ctx_ver":
+        await query.edit_message_text(
+            _texto_contexto_actual(),
+            reply_markup=_build_contexto_menu_keyboard(),
+        )
+
+    elif data.startswith("ctx_cat|"):
+        categoria = data.split("|", 1)[1]
+        context.user_data["ctx_categoria"] = categoria
+        context.user_data["estado"] = "esperando_ctx_valor"
+        pregunta = _CTX_PROMPTS.get(categoria, f"Contame qué cargar en '{categoria}' (ej: clave — descripción)")
+        await query.edit_message_text(f"📝 {pregunta}")
+
+    elif data == "ctx_cat_nueva":
+        context.user_data["estado"] = "esperando_ctx_nueva_cat"
+        await query.edit_message_text(
+            "➕ ¿Cómo se llama la nueva categoría?\n(una palabra, ej: Salud, Lectura, Familia)"
+        )
 
     # ── Check-ins de tareas ─────────────────────────────────────────────────
 
@@ -2357,6 +2442,25 @@ async def handle_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_checkin_tarea_cumplido(int(row_id), "parcial", texto)
         context.user_data.clear()
         await update.message.reply_text(f"📍 Anotado: {texto}")
+
+    elif estado == 'esperando_ctx_nueva_cat':
+        categoria = texto.strip().lower().split()[0] if texto.strip() else "general"
+        context.user_data["ctx_categoria"] = categoria
+        context.user_data["estado"] = "esperando_ctx_valor"
+        await update.message.reply_text(
+            f"📝 Categoría '{categoria}'. Ahora contame qué cargar\n(ej: clave — descripción)"
+        )
+
+    elif estado == 'esperando_ctx_valor':
+        categoria = context.user_data.get("ctx_categoria", "general")
+        clave, valor = _extraer_clave_valor(texto)
+        clave = _canonicalizar_clave(clave)
+        upsert_contexto(categoria, clave, valor)
+        context.user_data.clear()
+        await update.message.reply_text(
+            f"✅ Contexto guardado en {categoria}:\n{clave} → {valor}",
+            reply_markup=_build_contexto_menu_keyboard(),
+        )
 
     elif texto.lower() in ['hola', 'menu', 'menú']:
         context.user_data.clear()
